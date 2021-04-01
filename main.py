@@ -1,200 +1,16 @@
 #!/usr/bin/env python3
 import multiprocessing
-from abc import ABC
 from itertools import combinations
 
-import numpy as np
 import networkx as nx
 from sklearn.neighbors import KDTree
 import matplotlib.pyplot as plt
 
-
-class Message:
-    def __init__(self, target, update, prob):
-        prot_types = Protein.get_types()
-        if target not in prot_types or update not in prot_types:
-            raise ValueError('Invalid message for protein %s to update interaction with protein %s' % (target, update))
-        self.target = target
-        self.update = update
-
-        assert 0 <= prob <= 1
-        self.prob = prob
-
-    def __ne__(self, other):
-        return '%s:%s\tProbability:%s' % (self.target, self.update, self.prob)
-
-
-class Protein(ABC):
-    RAD3 = 'rad3'
-    IC_RAD3 = 'ic rad3'
-    POL2 = 'pol2'
-    IC_POL2 = 'ic pol2'
-    RAD26 = 'rad26'
-    IC_RAD26 = 'ic rad26'
-
-    def __init__(self, species, p_inter, color, pos_dim=2):
-        self.color = color
-        self.species = species
-        self.position = np.random.random(pos_dim)
-        self.p_inter = p_inter
-        self.messages = {}
-
-    def set_position_delta(self, delta):
-        self.position += delta
-        self.position = np.maximum(0, self.position)
-        self.position = np.minimum(1, self.position)
-
-    def get_position(self):
-        return self.position
-
-    def update_position(self, mag):
-        self.position += mag * np.random.uniform(-1, 1, len(self.position))
-        self.position = np.maximum(0, self.position)
-        self.position = np.minimum(1, self.position)
-
-    def update_p_inter(self, species, p_update):
-        print('UPDATE INTERACTION PROBABILITY %s, %s, %s.' % (self.species, species, p_update))
-        self.p_inter[species] = p_update
-
-    def interact(self, species):
-        tossing = np.random.random()
-        return self.p_inter[species] >= tossing
-
-    def add_message(self, target, update, prob):
-        if self.species == target:
-            self.update_p_inter(update, prob)
-        elif self.species == update:
-            self.update_p_inter(target, prob)
-        else:
-            self.messages['%s:%s' % (target, update)] = Message(target, update, prob)
-
-    def add_message_obj(self, m):
-        self.add_message(m.target, m.update, m.prob)
-
-    def del_message(self, key):
-        self.messages.pop(key)
-
-    def get_features(self):
-        c = self.color
-        x = self.position[0]
-        y = self.position[1]
-        edge = 'red' if self.messages.keys() else 'white'
-        return x, y, c, edge
-
-    @staticmethod
-    def get_types():
-        return [Protein.RAD3, Protein.IC_RAD3, Protein.POL2, Protein.IC_POL2, Protein.RAD26, Protein.IC_RAD26]
-
-
-class Rad3(Protein):
-    def __init__(self, p_inter, pos_dim):
-        if p_inter is None:
-            p_inter = {
-                Protein.RAD3: .2,
-                Protein.IC_RAD3: .5,
-                Protein.POL2: .05,
-                Protein.IC_POL2: .1,
-                Protein.RAD26: .05,
-                Protein.IC_RAD26: .1,
-            }
-        super().__init__(Protein.RAD3, p_inter, 'orange', pos_dim)
-
-
-class InfoRad3(Protein):
-    def __init__(self, p_inter, pos_dim):
-        if p_inter is None:
-            p_inter = {
-                Protein.RAD3: .5,
-                Protein.IC_RAD3: .5,
-                Protein.POL2: .1,
-                Protein.IC_POL2: .4,
-                Protein.RAD26: .1,
-                Protein.IC_RAD26: .4
-            }
-        # super().__init__(Protein.IC_RAD3, p_inter, 'lightsalmon', pos_dim)
-        super().__init__(Protein.IC_RAD3, p_inter, 'grey', pos_dim)
-
-
-class Pol2(Protein):
-    def __init__(self, p_inter, pos_dim):
-        if p_inter is None:
-            p_inter = {
-                Protein.RAD3: .05,
-                Protein.IC_RAD3: .1,
-                Protein.POL2: .2,
-                Protein.IC_POL2: .5,
-                Protein.RAD26: .05,
-                Protein.IC_RAD26: .1
-            }
-        super().__init__(Protein.POL2, p_inter, 'green', pos_dim)
-        
-        
-class InfoPol2(Protein):
-    def __init__(self, p_inter, pos_dim):
-        if p_inter is None:
-            p_inter = {
-                Protein.RAD3: .1,
-                Protein.IC_RAD3: .4,
-                Protein.POL2: .5,
-                Protein.IC_POL2: .5,
-                Protein.RAD26: .1,
-                Protein.IC_RAD26: .4
-            }
-        # super().__init__(Protein.IC_POL2, p_inter, 'springgreen', pos_dim)
-        super().__init__(Protein.IC_POL2, p_inter, 'grey', pos_dim)
-
-
-class Rad26(Protein):
-    def __init__(self, p_inter, pos_dim):
-        if p_inter is None:
-            p_inter = {
-                Protein.RAD3: .05,
-                Protein.IC_RAD3: .1,
-                Protein.POL2: .05,
-                Protein.IC_POL2: .1,
-                Protein.RAD26: .2,
-                Protein.IC_RAD26: .5
-            }
-        # super().__init__(Protein.RAD26, p_inter, 'blue', pos_dim)
-        super().__init__(Protein.RAD26, p_inter, 'grey', pos_dim)
-
-
-class InfoRad26(Protein):
-    def __init__(self, p_inter, pos_dim):
-        if p_inter is None:
-            p_inter = {
-                Protein.RAD3: .1,
-                Protein.IC_RAD3: .4,
-                Protein.POL2: .1,
-                Protein.IC_POL2: .4,
-                Protein.RAD26: .5,
-                Protein.IC_RAD26: .5
-            }
-        # super().__init__(Protein.IC_POL2, p_inter, 'lightblue', pos_dim)
-        super().__init__(Protein.IC_POL2, p_inter, 'grey', pos_dim)
-
-
-class ProteinFactory:
-    @staticmethod
-    def create(prot_type, pos_dim, p_inter=None):
-        if prot_type == Protein.RAD3:
-            return Rad3(p_inter, pos_dim)
-        elif prot_type == Protein.IC_RAD3:
-            return InfoRad3(p_inter, pos_dim)
-        elif prot_type == Protein.POL2:
-            return Pol2(p_inter, pos_dim)
-        elif prot_type == Protein.IC_POL2:
-            return InfoPol2(p_inter, pos_dim)
-        elif prot_type == Protein.RAD26:
-            return Rad26(p_inter, pos_dim)
-        elif prot_type == Protein.IC_RAD26:
-            return InfoRad26(p_inter, pos_dim)
-        else:
-            raise ValueError('Protein type %s is not supported' % prot_type)
+from modules.proteins import *
 
 
 class Nucleus:
-    INTERACT_RAD = .01
+    INTERACT_RAD = .015
 
     def __init__(self, num_proteins, pos_dim=2, t=.2):
         plt.ion()
@@ -222,7 +38,24 @@ class Nucleus:
             self.pos = [r.get() for r in results]
         self.state = KDTree(np.asarray(self.pos))
 
+    def global_event(self, target, update, prob):
+        [x.add_message(target, update, prob) for x in self.proteins]
+
+    def global_event_obj(self, m):
+        [x.add_message_obj(m) for x in self.proteins]
+
     def update(self):
+        def handshake(x, y, k):
+            m = self.proteins[x].broadcast(k)
+            self.proteins[y].add_message_obj(m)
+
+        collapse_mask = np.asarray([x.is_collapsing() for x in self.proteins])
+        idx = np.arange(len(self.proteins))
+        rev_idx = np.flip(idx[collapse_mask])
+        for i in rev_idx:
+            self.proteins.extend(self.proteins[i].prot_list)
+            del self.proteins[i]
+
         adj = np.zeros((len(self.proteins), len(self.proteins)))
         idc = self.state.query_radius(self.pos, r=Nucleus.INTERACT_RAD)
         for num, i in enumerate(idc):
@@ -230,43 +63,39 @@ class Nucleus:
         adj = np.multiply(adj, adj.T)
         interact_graph = nx.from_numpy_matrix(adj)
         pot_inter = sorted(nx.connected_components(interact_graph), reverse=True, key=len)
+
+        complexes = []
         success_inter = set()
         for inter_group in pot_inter:
             if len(inter_group) == 1:
                 continue
-            interactions = combinations(list(inter_group), 2)
+            interactions = list(combinations(list(inter_group), 2))
+            success_deliver = []
             for i, j in interactions:
-                if self.proteins[i].interact(self.proteins[j].species):
-                    keys = list(self.proteins[i].messages.keys())
-                    for k in keys:
-                        m = self.proteins[i].messages[k]
-                        if self.proteins[j].species == m.target:
-                            self.proteins[j].update_p_inter(m.update, m.prob)
-                        elif self.proteins[j].species == m.update:
-                            self.proteins[j].update_p_inter(m.target, m.prob)
-                        else:
-                            if k not in self.proteins[j].messages.keys():
-                                self.proteins[j].add_message_obj(m)
-                        self.proteins[i].del_message(k)
-                    keys = list(self.proteins[j].messages.keys())
-                    for k in keys:
-                        m = self.proteins[j].messages[k]
-                        if self.proteins[i].species == m.target:
-                            self.proteins[i].update_p_inter(m.update, m.prob)
-                        elif self.proteins[i].species == m.update:
-                            self.proteins[i].update_p_inter(m.target, m.prob)
-                        else:
-                            if k not in self.proteins[i].messages.keys():
-                                self.proteins[i].add_message_obj(m)
-                        self.proteins[j].del_message(k)
+                if self.proteins[i].share_info(self.proteins[j]) and i not in success_deliver:
+                    success_deliver.append(i)
+                    keys_i = list(self.proteins[i].get_message_keys())
+                    for k_i in keys_i:
+                        handshake(i, j, k_i)
+                if self.proteins[j].share_info(self.proteins[i]) and j not in success_deliver:
+                    success_deliver.append(i)
+                    keys_j = list(self.proteins[j].get_message_keys())
+                    for k_j in keys_j:
+                        handshake(j, i, k_j)
 
+            for i, j in interactions:
+                if self.proteins[i].interact(self.proteins[j]) or self.proteins[j].interact(self.proteins[i]):
+                    if i in success_inter or j in success_inter:
+                        continue
+                    complexes.append(ProteinComplex([self.proteins[i], self.proteins[j]]))
                     success_inter.add(i)
                     success_inter.add(j)
-        idx = np.arange(len(self.proteins)).astype('int')
-        fail_mask = np.ones(idx.size)
-        fail_mask[np.asarray(list(success_inter))] = 0.
 
-        [self.proteins[fi].update_position(self.t) for fi in idx[fail_mask.astype('bool')]]
+        self.proteins.extend(complexes)
+        success_inter = sorted(list(success_inter), reverse=True)
+        for si in success_inter:
+            del self.proteins[si]
+        [x.update_position(self.t) for x in self.proteins]
         self._fetch_pos()
 
     def display(self):
@@ -280,11 +109,15 @@ class Nucleus:
             results = [r.get() for r in results]
 
         x_all = list(map(lambda x: x[0], results))
+        x_all = [x for x_group in x_all for x in x_group]
         y_all = list(map(lambda x: x[1], results))
+        y_all = [y for y_group in y_all for y in y_group]
         c_all = list(map(lambda x: x[2], results))
+        c_all = [c for c_group in c_all for c in c_group]
         edge_all = list(map(lambda x: x[3], results))
+        edge_all = [edge for edge_group in edge_all for edge in edge_group]
 
-        plt.scatter(x_all, y_all, c=c_all, edgecolors=edge_all)
+        plt.scatter(x_all, y_all, s=1./Nucleus.INTERACT_RAD, c=c_all, edgecolors=edge_all)
         figure = plt.gcf()
         figure.canvas.flush_events()
         figure.canvas.draw()
