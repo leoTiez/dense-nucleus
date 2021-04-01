@@ -192,7 +192,7 @@ class ProteinComplex(AbstractProteinComplex):
         c = list(map(lambda p: p.color, self.prot_list))
         x = list(map(lambda p: p.position[0], self.prot_list))
         y = list(map(lambda p: p.position[1], self.prot_list))
-        edge = 'red' if self.get_message_keys() else 'white'
+        edge = 'blue'
         return x, y, c, len(self.prot_list) * [edge]
 
 
