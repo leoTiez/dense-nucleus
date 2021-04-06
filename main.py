@@ -7,22 +7,27 @@ from sklearn.neighbors import KDTree
 import matplotlib.pyplot as plt
 
 from modules.proteins import *
+from modules.dna import *
+from modules.messengers import *
 
 
 class Nucleus:
-    INTERACT_RAD = .015
+    INTERACT_RAD = .02
 
     def __init__(self, num_proteins, pos_dim=2, t=.2):
         plt.ion()
         prot_types = Protein.get_types()
-        assert len(prot_types) == len(num_proteins)
+        if not len(prot_types) == len(num_proteins):
+            raise ValueError('Pass one value for each protein type to determine how many should be created.')
         self.proteins = [ProteinFactory.create(t_prot, pos_dim)
                          for t_prot, n in zip(prot_types, num_proteins) for _ in range(int(n))]
 
         self.pos_dim = pos_dim
-        assert 0. <= t <= 1.
+        if not 0. <= t <= 1.:
+            raise ValueError('t must be between 0 and 1 as it represents the magnitude of movement')
         self.t = t
-
+        self.dna = DNA()
+        self.dna.add_segment(0, .15, Protein.RAD3, 1., sc=None, tc=Condition(Rad3, 90, is_greater=True))
         self.pos = []
         self.state = None
         self._fetch_pos()
@@ -49,13 +54,27 @@ class Nucleus:
             m = self.proteins[x].broadcast(k)
             self.proteins[y].add_message_obj(m)
 
+        success_asso = set()
+        for num, seg in enumerate(self.dna):
+            dissoc_prot = seg.dissociate()
+            self.proteins.extend(dissoc_prot)
+            neighbor_prots = self.state.query_radius(seg.get_position(), r=Nucleus.INTERACT_RAD)
+            neighbor_prots = np.unique([x for n in neighbor_prots for x in n])
+            neighbor_prots = sorted(neighbor_prots, reverse=True)
+            for i in neighbor_prots:
+                mes = seg.emit()
+                if mes is not None:
+                    self.proteins[i].add_message_obj(mes)
+                if self.proteins[i].interact(seg):
+                    self.dna.dna_segments[num].add_protein(self.proteins[i])
+                    success_asso.add(i)
+
         collapse_mask = np.asarray([x.is_collapsing() for x in self.proteins])
         idx = np.arange(len(self.proteins))
         rev_idx = np.flip(idx[collapse_mask])
         for i in rev_idx:
             self.proteins.extend(self.proteins[i].prot_list)
             del self.proteins[i]
-
         adj = np.zeros((len(self.proteins), len(self.proteins)))
         idc = self.state.query_radius(self.pos, r=Nucleus.INTERACT_RAD)
         for num, i in enumerate(idc):
@@ -72,6 +91,8 @@ class Nucleus:
             interactions = list(combinations(list(inter_group), 2))
             success_deliver = []
             for i, j in interactions:
+                if i in list(success_asso) or j in success_asso:
+                    continue
                 if self.proteins[i].share_info(self.proteins[j]) and i not in success_deliver:
                     success_deliver.append(i)
                     keys_i = list(self.proteins[i].get_message_keys())
@@ -92,9 +113,10 @@ class Nucleus:
                     success_inter.add(j)
 
         self.proteins.extend(complexes)
-        success_inter = sorted(list(success_inter), reverse=True)
+        success_inter = sorted(list(success_inter.union(success_asso)), reverse=True)
         for si in success_inter:
             del self.proteins[si]
+
         [x.update_position(self.t) for x in self.proteins]
         self._fetch_pos()
 
@@ -108,6 +130,12 @@ class Nucleus:
             parallel.join()
             results = [r.get() for r in results]
 
+        pos = [p.get_position() for seg in self.dna for p in seg.proteins]
+        if not pos:
+            x_recruited, y_recruited = [], []
+        else:
+            x_recruited, y_recruited = zip(*pos)
+
         x_all = list(map(lambda x: x[0], results))
         x_all = [x for x_group in x_all for x in x_group]
         y_all = list(map(lambda x: x[1], results))
@@ -117,7 +145,13 @@ class Nucleus:
         edge_all = list(map(lambda x: x[3], results))
         edge_all = [edge for edge_group in edge_all for edge in edge_group]
 
-        plt.scatter(x_all, y_all, s=1./Nucleus.INTERACT_RAD, c=c_all, edgecolors=edge_all)
+        plt.scatter(x_all, y_all, s=5e3 * Nucleus.INTERACT_RAD, c=c_all, edgecolors=edge_all)
+        plt.plot(np.linspace(0, 1, 10), [0.5] * 10, linewidth=5.0, color='black')
+        for seg in self.dna:
+            x, y = seg.get_position().T
+            plt.plot(x, y, linewidth=5.0)
+        plt.scatter(
+            x_recruited, y_recruited, s=5e3 * Nucleus.INTERACT_RAD, c='red', edgecolor="gold", hatch=r"//", zorder=5)
         figure = plt.gcf()
         figure.canvas.flush_events()
         figure.canvas.draw()
@@ -126,9 +160,9 @@ class Nucleus:
 
 def main():
     num_proteins = len(Protein.get_types())
-    nucleus = Nucleus(200 * np.ones(num_proteins), t=.02)
-    idx = np.random.choice(1200, size=200)
-    [nucleus.proteins[i].add_message(target=Protein.RAD3, update=Protein.POL2, prob=1.) for i in idx]
+    nucleus = Nucleus(200 * np.ones(num_proteins), t=.03)
+    # idx = np.random.choice(1200, size=200)
+    # [nucleus.proteins[i].add_message(target=Protein.RAD3, update=Protein.POL2, prob=1.) for i in idx]
     for _ in range(200):
         nucleus.update()
         nucleus.display()
