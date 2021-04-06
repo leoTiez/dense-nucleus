@@ -27,9 +27,15 @@ class Protein(AbstractProtein, ABC):
         species = p.species
         toss = np.random.random()
         if prob_type == 'inter':
-            return self.p_inter[species] >= toss
+            if species in self.p_inter.keys():
+                return self.p_inter[species] >= toss
+            else:
+                return False
         elif prob_type == 'info':
-            return self.p_info[species] >= toss
+            if species in self.p_inter.keys():
+                return self.p_info[species] >= toss
+            else:
+                return False
         else:
             raise ValueError('Probability type %s is not understood' % prob_type)
 
@@ -55,6 +61,8 @@ class Protein(AbstractProtein, ABC):
             return self._tossing(protein, prob_type='inter')
         elif isinstance(protein, ProteinComplex):
             return all(map(lambda x: self._tossing(x, prob_type='inter'), protein.prot_list))
+        elif isinstance(protein, AbstractDNASegment):
+            return self._tossing(protein, prob_type='inter')
         else:
             raise ValueError('Passed protein is not of class Protein or Protein Complex')
 
