@@ -13,3 +13,7 @@ class AbstractProteinComplex(ABC):
 class AbstractDNASegment(ABC):
     pass
 
+
+class AbstractEvent(ABC):
+    pass
+
