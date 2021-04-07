@@ -17,3 +17,7 @@ class AbstractDNASegment(ABC):
 class AbstractEvent(ABC):
     pass
 
+
+class AbstractAction(ABC):
+    pass
+
