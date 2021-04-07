@@ -21,6 +21,7 @@ class Protein(AbstractProtein, ABC):
         self.position = np.random.random(pos_dim)
         self.p_inter = p_inter
         self.p_info = p_info
+        self.is_associated = False
         self.messages = {}
 
     def _tossing(self, p, prob_type='inter'):
@@ -88,6 +89,9 @@ class Protein(AbstractProtein, ABC):
     def del_message(self, key):
         self.messages.pop(key)
 
+    def clear_messages(self):
+        self.messages = {}
+
     def get_message_keys(self):
         return self.messages.keys()
 
@@ -104,7 +108,7 @@ class Protein(AbstractProtein, ABC):
         c = self.color
         x = self.position[0]
         y = self.position[1]
-        edge = 'red' if self.messages.keys() else 'white'
+        edge = 'limegreen' if self.messages.keys() else 'white'
         return [x], [y], [c], [edge]
 
     @staticmethod
@@ -126,7 +130,8 @@ class ProteinComplex(AbstractProteinComplex):
             return proteins
 
         self.prot_list = flatten_list()
-        self.position = prot_list[0].get_position()
+        self.position = self.prot_list[0].get_position()
+        self.is_associated = self.prot_list[0].is_associated
         self._init_broadcast()
 
     def _init_broadcast(self):
@@ -181,6 +186,9 @@ class ProteinComplex(AbstractProteinComplex):
             print('Different number of messages in complex')
             pass
 
+    def clear_messages(self):
+        [x.clear_messages() for x in self.prot_list]
+
     def get_message_keys(self):
         return self.prot_list[0].messages.keys()
 
@@ -202,6 +210,10 @@ class ProteinComplex(AbstractProteinComplex):
         y = list(map(lambda p: p.position[1], self.prot_list))
         edge = 'blue'
         return x, y, c, len(self.prot_list) * [edge]
+
+
+class InfoProtein(Protein):
+    pass
 
 
 class Rad3(Protein):
@@ -227,7 +239,7 @@ class Rad3(Protein):
         super().__init__(Protein.RAD3, p_inter, p_info, 'orange', pos_dim)
 
 
-class InfoRad3(Protein):
+class InfoRad3(InfoProtein):
     def __init__(self, p_inter, p_info, pos_dim):
         if p_inter is None:
             p_inter = {
@@ -273,9 +285,10 @@ class Pol2(Protein):
                 Protein.IC_RAD26: .1,
             }
         super().__init__(Protein.POL2, p_inter, p_info, 'green', pos_dim)
+        # super().__init__(Protein.POL2, p_inter, p_info, 'grey', pos_dim)
 
 
-class InfoPol2(Protein):
+class InfoPol2(InfoProtein):
     def __init__(self, p_inter, p_info, pos_dim):
         if p_inter is None:
             p_inter = {
@@ -319,11 +332,11 @@ class Rad26(Protein):
                 Protein.RAD26: .3,
                 Protein.IC_RAD26: .9,
             }
-        # super().__init__(Protein.RAD26, p_inter, p_info, 'blue', pos_dim)
+        # super().__init__(Protein.RAD26, p_inter, p_info, 'cyan', pos_dim)
         super().__init__(Protein.RAD26, p_inter, p_info, 'grey', pos_dim)
 
 
-class InfoRad26(Protein):
+class InfoRad26(InfoProtein):
     def __init__(self, p_inter, p_info, pos_dim):
         if p_inter is None:
             p_inter = {
