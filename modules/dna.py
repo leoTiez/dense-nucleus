@@ -272,6 +272,7 @@ class DNA:
         for seg in segments:
             try:
                 self.dna_segments[self.id_map[seg]].del_protein(p)
+                p.is_associated = False
             except:
                 pass
 
