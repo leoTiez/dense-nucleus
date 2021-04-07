@@ -31,7 +31,39 @@ class Condition(AbstractEvent):
             else:
                 return False
         else:
-            if mask.sum() <= self.num:
+            if mask.sum() < self.num:
                 return True
             else:
-                False
+                return False
+
+
+class Event(AbstractEvent):
+    def __init__(self, message, sc=None, tc=None):
+        if not isinstance(message, Message):
+            raise ValueError('Passed message is not of type Message')
+        if sc is not None:
+            if not isinstance(sc, Condition):
+                raise ValueError('Passed starting condition is not of type Condition')
+        if tc is not None:
+            if not isinstance(tc, Condition):
+                raise ValueError('Passed termination condition is not of type Condition')
+        self.message = message
+        self.sc = sc
+        self.tc = tc
+
+
+class Action(AbstractAction):
+    def __init__(self, message, callback, sc=None, tc=None):
+        if not isinstance(message, Message):
+            raise ValueError('Passed message is not of type Message')
+        if sc is not None:
+            if not isinstance(sc, Condition):
+                raise ValueError('Passed starting condition is not of type Condition')
+        if tc is not None:
+            if not isinstance(tc, Condition):
+                raise ValueError('Passed termination condition is not of type Condition')
+        self.callback = callback
+        self.message = message
+        self.sc = sc
+        self.tc = tc
+
