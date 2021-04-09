@@ -12,19 +12,18 @@ class DNASegment(AbstractDNASegment):
         self.start = start
         self.stop = stop
         self.species = '%s:%s' % (self.start, self.stop)
+
+        self.events = {}
         if event is not None:
             if not isinstance(event, AbstractEvent):
                 raise ValueError('Passed event is not of type Event')
-            self.events = [event]
-        else:
-            self.events = []
+            self.events[event.message.target] = event
 
+        self.actions = {}
         if action is not None:
             if not isinstance(action, AbstractAction):
                 raise ValueError('Passed action is not of type Action')
-            self.actions = [action]
-        else:
-            self.actions = []
+            self.actions[action.message.target] = action
 
         self.on_add = on_add
         self.on_del = on_del
@@ -32,8 +31,9 @@ class DNASegment(AbstractDNASegment):
         self.proteins = []
 
     def _apply_action(self, a, i):
-        self.proteins[i].add_message_obj(a.message)
-        a.callback(self.proteins[i])
+        if self.proteins[i].species == a.message.target:
+            self.proteins[i].add_message_obj(a.message)
+            a.callback(self.proteins[i])
 
     def get_position(self):
         x = np.arange(self.start, self.stop, DNASegment.SEGMENT_UNIT)
@@ -43,50 +43,43 @@ class DNASegment(AbstractDNASegment):
     def add_event(self, event):
         if not isinstance(event, AbstractEvent):
             raise ValueError('Passed event is not of type Event')
-        self.events.append(event)
+        self.events[event.message.target] = event
 
     def add_action(self, action):
         if not isinstance(action, AbstractAction):
             raise ValueError('Passed action is not of type Event')
-        self.actions.append(action)
+        self.actions[action.message.target] = action
 
     def add_protein(self, p):
         self.proteins.append(p)
+        p.is_associated = True
         if self.on_add is not None:
-            self._apply_action(self.on_add, -1)
+            [self._apply_action(on_add, -1) for on_add in self.on_add]
 
     def del_protein(self, p):
+        if p not in self.proteins:
+            return
         if self.on_del is not None:
             i = self.proteins.index(p)
-            self._apply_action(self.on_del, i)
+            [self._apply_action(on_del, i) for on_del in self.on_del]
         self.proteins.remove(p)
 
-    def dissociate(self):
-        dissoc_prot = []
-        for p in self.proteins:
-            x_pos, y_pos = p.get_position()
-            if not p.interact(self) or not self.start <= x_pos <= self.stop or not .48 <= y_pos <= .52:
-                dissoc_prot.append(p)
-                self.del_protein(p)
-
-        return dissoc_prot
+    def dissociate(self, p):
+        x_pos, y_pos = p.get_position()
+        if not p.interact(self) or not self.start <= x_pos <= self.stop or not .48 <= y_pos <= .52:
+            self.del_protein(p)
+            return True
+        return False
 
     def emit(self):
         messages = []
-        delete = set()
-        for num, e in enumerate(self.events):
-            if e.sc is not None:
-                if e.sc(self.proteins):
-                    e.sc = None
-                    messages.append(e.message)
-            else:
-                if e.tc is None:
-                    messages.append(e.message)
-                else:
-                    if not e.tc(self.proteins):
+        for num, e in enumerate(self.events.values()):
+            if e.tc is None or not e.tc(self.proteins):
+                if e.sc is not None:
+                    if e.sc(self.proteins):
                         messages.append(e.message)
-                    else:
-                        delete.add(num)
+                else:
+                    messages.append(e.message)
 
         if not messages:
             print('Emit no messages')
@@ -100,7 +93,7 @@ class DNASegment(AbstractDNASegment):
         if not self.proteins:
             return
 
-        for num, a in enumerate(self.actions):
+        for key, a in self.actions.items():
             if a.sc is not None:
                 if a.sc(self.proteins):
                     apply_action()
@@ -206,6 +199,8 @@ class DNA:
             on_del=None,
             is_damage=False
     ):
+        start = float(start)
+        stop = float(stop)
         key = '%s:%s' % (start, stop)
         if key not in self.dna_segments.keys():
             self.segment_tree.insert(len(self.dna_segments.keys()), (start, .49, stop, .51))
@@ -240,7 +235,7 @@ class DNA:
             if on_del is not None:
                 self.dna_segments[key].on_del = on_del
 
-        if update_area is not None:
+        if update_area is not None and action is None:
             values = update_area.split(':')
             update_start = float(values[0])
             update_stop = float(values[1])
@@ -268,22 +263,30 @@ class DNA:
                     self.dna_segments[self.id_map[seg]].add_protein(p)
 
     def del_protein(self, p):
-        segments = self._get_overlap(p)
-        for seg in segments:
+        for key in self.dna_segments.keys():
             try:
-                self.dna_segments[self.id_map[seg]].del_protein(p)
-                p.is_associated = False
+                self.dna_segments[key].del_protein(p)
             except:
                 pass
 
     def dissociate(self):
-        dissoc_prot = []
+        dissoc_prot = set()
+        remain_prot = set()
         for key in self.dna_segments.keys():
-            dissoc_prot.extend(self.dna_segments[key].dissociate())
+            proteins = list(reversed(self.dna_segments[key].proteins))
+            for p in proteins:
+                if p in dissoc_prot or p in remain_prot:
+                    continue
+                segments = self._get_overlap(p)
+                p_dissoc = [self.dna_segments[self.id_map[seg]].dissociate(p) for seg in segments]
+                if all(p_dissoc):
+                    dissoc_prot.add(p)
+                    p.is_associated = False
+                else:
+                    remain_prot.add(p)
 
-        dissoc_prot = list(set(dissoc_prot))
-        [self.del_protein(p) for p in dissoc_prot]
-        return dissoc_prot
+        [self.del_protein(p) for p in list(dissoc_prot)]
+        return list(dissoc_prot)
 
     def segment_update(self):
         for key in self.dna_segments.keys():
