@@ -12,7 +12,7 @@ class Message:
         assert 0 <= prob <= 1
         self.prob = prob
 
-    def __ne__(self, other):
+    def __str__(self):
         return '%s:%s\tProbability:%s' % (self.target, self.update, self.prob)
 
 
@@ -24,7 +24,13 @@ class Condition(AbstractEvent):
 
     def __call__(self, *args, **kwargs):
         proteins = args[0]
-        mask = np.asarray([isinstance(x, self.prot_type) for x in proteins])
+        mask = []
+        for x in proteins:
+            if isinstance(x, AbstractProteinComplex):
+                mask.extend([p.species == self.prot_type or self.prot_type == '' for p in x.prot_list])
+            else:
+                mask.append(x.species == self.prot_type or self.prot_type == '')
+        mask = np.asarray(mask)
         if self.is_greater:
             if mask.sum() >= self.num:
                 return True
