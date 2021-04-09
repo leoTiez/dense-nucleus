@@ -131,7 +131,9 @@ class ProteinComplex(AbstractProteinComplex):
 
         self.prot_list = flatten_list()
         self.position = self.prot_list[0].get_position()
-        self.is_associated = self.prot_list[0].is_associated
+        self.is_associated = all([x.is_associated for x in self.prot_list])
+        self.species = '_'.join(sorted([x.species for x in self.prot_list]))
+        self.p_complex = {}
         self._init_broadcast()
 
     def _init_broadcast(self):
@@ -152,8 +154,11 @@ class ProteinComplex(AbstractProteinComplex):
                 unique, _ = zip(*sorted(zip(unique, counts), reverse=True, key=lambda x: x[1]))
                 temp_mes[k] = Message(temp_mes[k][0].target, temp_mes[k][0].update, unique[0])
 
-        for p in self.prot_list:
-            [p.add_message_obj(m) for m in temp_mes.values()]
+        [self.add_message_obj(m) for m in temp_mes.values()]
+
+    def _update_p_inter(self, species, p_update):
+        print('UPDATE INTERACTION PROBABILITY %s, %s, %s.' % (self.species, species, p_update))
+        self.p_complex[species] = p_update
 
     def set_position_delta(self, delta):
         [x.set_position_delta(delta) for x in self.prot_list]
@@ -167,14 +172,22 @@ class ProteinComplex(AbstractProteinComplex):
         self.set_position_delta(delta)
 
     def interact(self, protein):
+        if protein.species in self.p_complex.keys():
+            toss = np.random.random()
+            return self.p_complex[protein.species] >= toss
         return all([x.interact(protein) for x in self.prot_list])
 
     def share_info(self, species):
         # TODO ANY OR ALL BETTER FOR SHARING INFO?
-        return any([x.share_info(species) for x in self.prot_list])
+        return all([x.share_info(species) for x in self.prot_list])
 
     def add_message(self, target, update, prob):
-        [x.add_message(target, update, prob) for x in self.prot_list]
+        if self.species == target:
+            self._update_p_inter(update, prob)
+        elif self.species == update:
+            self._update_p_inter(target, prob)
+        else:
+            [x.add_message(target, update, prob) for x in self.prot_list]
 
     def add_message_obj(self, m):
         self.add_message(m.target, m.update, m.prob)
@@ -271,7 +284,7 @@ class Pol2(Protein):
                 Protein.IC_RAD3: .05,
                 Protein.POL2: .1,
                 Protein.IC_POL2: .05,
-                Protein.RAD26: .05,
+                Protein.RAD26: .7,
                 Protein.IC_RAD26: .05
             }
 
@@ -318,7 +331,7 @@ class Rad26(Protein):
             p_inter = {
                 Protein.RAD3: .05,
                 Protein.IC_RAD3: .05,
-                Protein.POL2: .05,
+                Protein.POL2: .7,
                 Protein.IC_POL2: .05,
                 Protein.RAD26: .05,
                 Protein.IC_RAD26: .1
@@ -332,8 +345,8 @@ class Rad26(Protein):
                 Protein.RAD26: .3,
                 Protein.IC_RAD26: .9,
             }
-        # super().__init__(Protein.RAD26, p_inter, p_info, 'cyan', pos_dim)
-        super().__init__(Protein.RAD26, p_inter, p_info, 'grey', pos_dim)
+        super().__init__(Protein.RAD26, p_inter, p_info, 'cyan', pos_dim)
+        # super().__init__(Protein.RAD26, p_inter, p_info, 'grey', pos_dim)
 
 
 class InfoRad26(InfoProtein):
