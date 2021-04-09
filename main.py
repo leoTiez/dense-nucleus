@@ -18,6 +18,23 @@ class Nucleus:
     INTERACT_RAD = .015
 
     def __init__(self, num_proteins, pos_dim=2, t=.2, animation=False):
+        """
+        Nucleus class implements the protein and DNA dynamics in the nucleus. Proteins and DNA are assumed to
+        be independent that don't know of each other. All movements are random. The extend of the random movement is
+        governed by the temperature. DNA and proteins can physically
+        interact and create complexes and/or share information. Information is considered to be updates of the
+        interaction probabilities, either between proteins or between protein and DNA. In order to make recruitment
+        effective, the nucleus should be densely packed with proteins and DNA.
+        :param num_proteins: list or tuple, number of proteins for each protein type. There should be
+        one number per protein type. Order follows the order of the Protein.get_types() order.
+        :type num_proteins: list, tuple
+        :param pos_dim: Dimensionality of the nucleus. Default is two.
+        :type pos_dim: int
+        :param t: Temperature. Represents the maximum movement into x and y direction of a protein.
+        :type t: float
+        :param animation: Create an animation of the simulated process
+        :type animation: bool
+        """
         plt.ion()
         prot_types = Protein.get_types()
         if not len(prot_types) == len(num_proteins):
@@ -148,16 +165,6 @@ class Nucleus:
             ],
         )
 
-        # self.dna.add_event(
-        #     start=self.tss[0],
-        #     stop=self.tss[1],
-        #     target=Protein.RAD3,
-        #     new_prob=.0,
-        #     sc=Condition(Protein.POL2, 1, is_greater=True),
-        #     tc=Condition(Protein.POL2, 1, is_greater=False),
-        #     update_area='%s:%s' % (self.core_promoter[0], self.core_promoter[1])
-        # )
-
         self.dna.add_event(
             start=self.tss[0],
             stop=self.tss[1],
@@ -175,11 +182,11 @@ class Nucleus:
         """
         def pol2_callback(p):
             if isinstance(p, Pol2):
-                p.set_position_delta(np.asarray([1.2 * Nucleus.INTERACT_RAD, .0]))
+                p.set_position_delta(np.asarray([1.4 * Nucleus.INTERACT_RAD, .0]))
 
         def complex_callback(p):
             if p.species == '_'.join(sorted([Protein.POL2, Protein.RAD26])):
-                p.set_position_delta(np.asarray([1.2 * Nucleus.INTERACT_RAD, .0]))
+                p.set_position_delta(np.asarray([1.4 * Nucleus.INTERACT_RAD, .0]))
 
         # Pol2 and complex is pushed forward along transcript with pol2_callback/complex callback
         # When Pol2/complex associates, the probability of staying on the transcript is increased by is set back to 0
@@ -248,6 +255,10 @@ class Nucleus:
         )
 
     def _fetch_pos(self):
+        """
+        Retrieve the position of all proteins and represent it in a list as well as a KD tree
+        :return: None
+        """
         with multiprocessing.Pool(np.maximum(multiprocessing.cpu_count() - 1, 1)) as parallel:
             results = []
             for p in self.proteins:
@@ -259,23 +270,43 @@ class Nucleus:
         self.state = KDTree(np.asarray(self.pos))
 
     def global_event(self, target, update, prob):
+        """
+        Send a global event that influences all proteins (e.g radiation)
+        :param target: Target protein
+        :type target: str
+        :param update: The interaction probability is updated for this protein or DNA segment
+        :type update: str
+        :param prob: New interaction probability
+        :type prob: float
+        :return: None
+        """
         for i in range(len(self.proteins)):
             self.proteins[i].clear_messages()
             if self.proteins[i].species == target:
                 self.proteins[i].add_message(target, update, prob)
 
     def global_event_obj(self, m):
+        """
+        Wrapper function for sending a global event with a Message object (see global_event).
+        :param m: Message object with target protein, for what the interaction probability changes, and the new
+        interaction probability
+        :type m: Message
+        :return:
+        """
         self.global_event(m.target, m.update, m.prob)
 
-    def radiate(self, damage_site_x=None):
+    def radiate(self, damage_site_x=None, damage_len=.1):
         """
         Radiate cell
-        :param damage_site_x: Optional add start position of damage
+        :param damage_site_x: Optional add start position of damage. Default None
+        :type damage_site_x: float
+        :param damage_len: Length of the lesion area
+        :type damage_len: float
         :return: None
         """
         if damage_site_x is None:
-            damage_site_x = np.random.uniform(self.transcript[0], self.transcript[1] - .1)
-        damage_site = (damage_site_x, damage_site_x + .1)
+            damage_site_x = np.random.uniform(self.transcript[0], self.transcript[1] - damage_len)
+        damage_site = (damage_site_x, damage_site_x + damage_len)
 
         # Stalling of Pol2/Complex
         self.dna.add_action(
@@ -426,7 +457,22 @@ class Nucleus:
         )
 
     def update(self):
+        """
+        Updates the nucleus state. This includes updating the protein positions, modelling the protein:protein
+        and protein:DNA interactions, and collapsing unstable .
+        :return: None
+        """
         def handshake(x, y, k):
+            """
+            Local handshake function. Defines the procedure how proteins exchange information.
+            :param x: Sending protein index
+            :type x: int
+            :param y: Receiving protein index
+            :type y: int
+            :param k: Message key/identifier (target:update)
+            :type k: str
+            :return:
+            """
             m = self.proteins[x].broadcast(k)
             self.proteins[y].add_message_obj(m)
 
@@ -511,6 +557,12 @@ class Nucleus:
             del self.proteins[si]
 
     def display(self):
+        """
+        Display state nucleus state. Matplotlib is continuously updated. Therefore, process is not blocked by
+        plotting. If self.animation is set to true, plots are buffered for providing the possibility to create a
+        gif.
+        :return: None
+        """
         results = []
         with multiprocessing.Pool(np.maximum(multiprocessing.cpu_count() - 1, 1)) as parallel:
             for p in self.proteins:
@@ -565,13 +617,33 @@ class Nucleus:
         plt.cla()
 
     def to_gif(self, path, save_prefix):
-        curr_dir = os.getcwd()
-        Path('%s/%s' % (curr_dir, path)).mkdir(exist_ok=True, parents=True)
-        imageio.mimsave("%s/%s_nucleus_ani.gif" % (path, save_prefix), self.gif, fps=5)
+        """
+        Convert buffered plots (created through running the display function) to a gif. Only possible if
+        plots were already created and buffered. Therefore, self.animation must be set to true.
+        :param path: Path from current directory where gif is to be stored. If it doesn't exist, directories
+        (including parent directories) are created.
+        :type path: str
+        :param save_prefix: Identifier that is put at the beginning of the set file
+        :type save_prefix: str
+        :return: None
+        """
+        if self.gif:
+            curr_dir = os.getcwd()
+            Path('%s/%s' % (curr_dir, path)).mkdir(exist_ok=True, parents=True)
+            imageio.mimsave("%s/%s_nucleus_ani.gif" % (path, save_prefix), self.gif, fps=5)
+
+
+class PetriDish:
+    def __init__(self, num_cells, composition=None, t=.035):
+        if composition is None:
+            self.composition = [500, 200, 500, 200, 500, 200]
+        else:
+            self.composition = composition
+        self.culture = [Nucleus(composition, t=t, animation=False) for _ in range(num_cells)]
 
 
 def main():
-    nucleus = Nucleus([500, 200, 500, 200, 500, 200], t=.035, animation=True)
+    nucleus = Nucleus([500, 200, 500, 200, 500, 200], t=.035, animation=False)
     for t in range(150):
         if t == 100:
             print('########################### ADD DAMAGE')
