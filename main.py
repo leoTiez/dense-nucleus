@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
+import os
 import multiprocessing
 from itertools import combinations
 
 import networkx as nx
 from sklearn.neighbors import KDTree
 import matplotlib.pyplot as plt
+import imageio
+from pathlib import Path
 
 from modules.proteins import *
 from modules.dna import *
@@ -12,13 +15,9 @@ from modules.messengers import *
 
 
 class Nucleus:
-    INTERACT_RAD = .02
+    INTERACT_RAD = .015
 
-    def __init__(self, num_proteins, pos_dim=2, t=.2):
-        def pol2_callback(p):
-            if isinstance(p, Pol2):
-                p.set_position_delta(np.asarray([1.2 * Nucleus.INTERACT_RAD, 0]))
-
+    def __init__(self, num_proteins, pos_dim=2, t=.2, animation=False):
         plt.ion()
         prot_types = Protein.get_types()
         if not len(prot_types) == len(num_proteins):
@@ -32,44 +31,221 @@ class Nucleus:
         self.t = t
         self.dna = DNA()
 
-        # Define core promoter
-        self.dna.add_event(
-            start=0,
-            stop=.1,
-            target=Protein.RAD3,
-            new_prob=.9,
-            sc=Condition(Rad3, 2, is_greater=False),
-            tc=Condition(Rad3, 2, is_greater=True)
-        )
-        self.dna.add_event(
-            start=0,
-            stop=.1,
-            target=Protein.POL2,
-            new_prob=.9,
-            sc=Condition(Rad3, 2, is_greater=True),
-            tc=Condition(Rad3, 2, is_greater=False),
-            update_area='%s:%s' % (.1, .125)
-        )
+        self.core_promoter = (.0, .1)
+        self.tss = (.1, .15)
+        self.transcript = (.1, .85)
 
-        self.dna.add_action(
-            start=.1,
-            stop=.85,
-            target=Protein.POL2,
-            new_prob=.99,
-            callback=pol2_callback,
-            on_add=Action(
-                Message(target=Protein.POL2, update='%s:%s' % (.1, .85), prob=.99),
-                lambda x: None
-            ),
-            on_del=Action(
-                Message(target=Protein.POL2, update='%s:%s' % (.1, .85), prob=.0),
-                lambda x: None
-            ),
-        )
+        self._init_core_promoter()
+        self._init_tss()
+        self._init_transcript()
 
         self.pos = []
         self.state = None
         self._fetch_pos()
+        self.animation = animation
+        self.gif = []
+
+    def _init_core_promoter(self):
+        """
+        Define core promoter
+        :return: None
+        """
+        self.dna.add_event(
+            start=self.core_promoter[0],
+            stop=self.core_promoter[1],
+            target=Protein.RAD3,
+            new_prob=.9,
+            sc=Condition(Protein.RAD3, 1, is_greater=False),
+            tc=Condition(Protein.RAD3, 1, is_greater=True)
+        )
+
+        # When Rad3 associated, Pol2 or a Pol2-Rad26 complex can attach to transcription starting site
+        self.dna.add_event(
+            start=self.core_promoter[0],
+            stop=self.core_promoter[1],
+            target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
+            new_prob=.9,
+            sc=Condition(Protein.RAD3, 1, is_greater=True),
+            tc=Condition(Protein.RAD3, 1, is_greater=False),
+            update_area='%s:%s' % (self.tss[0], self.tss[1])
+        )
+        self.dna.add_event(
+            start=self.core_promoter[0],
+            stop=self.core_promoter[1],
+            target=Protein.POL2,
+            new_prob=.9,
+            sc=Condition(Protein.RAD3, 1, is_greater=True),
+            tc=Condition(Protein.RAD3, 1, is_greater=False),
+            update_area='%s:%s' % (self.tss[0], self.tss[1])
+        )
+
+    def _init_tss(self):
+        """
+        Define transcription starting site
+        :return: None
+        """
+
+        # When Pol2 is associated, probability increased to stay associated, but interaction probability is
+        # set back to 0 when Pol2 dissociates
+        self.dna.add_action(
+            start=self.tss[0],
+            stop=self.tss[1],
+            target=Protein.POL2,
+            new_prob=.999,
+            callback=lambda x: None,
+            on_add=[Action(
+                Message(
+                    target=Protein.POL2,
+                    update='%s:%s' % (self.tss[0], self.tss[1]),
+                    prob=.999
+                ),
+                lambda x: None
+                )],
+            on_del=[Action(
+                Message(
+                    target=Protein.POL2,
+                    update='%s:%s' % (self.tss[0], self.tss[1]),
+                    prob=.0
+                ),
+                lambda x: None
+            )]
+        )
+
+        # Similar for the Pol2-Rad26 complex but also increase interaction probability for complex
+        self.dna.add_action(
+            start=self.tss[0],
+            stop=self.tss[1],
+            target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
+            new_prob=.999,
+            callback=lambda x: None,
+            on_add=[
+                Action(
+                    Message(
+                        target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
+                        update='%s:%s' % (self.tss[0], self.tss[1]),
+                        prob=.999
+                    ),
+                    lambda x: None
+                ),
+                Action(
+                    Message(Protein.POL2, update=Protein.RAD26, prob=.999),
+                    lambda x: None
+                ),
+            ],
+            on_del=[
+                Action(
+                    Message(
+                        target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
+                        update='%s:%s' % (self.tss[0], self.tss[1]),
+                        prob=.0
+                    ),
+                    lambda x: None
+                ),
+                Action(
+                    Message(Protein.POL2, update=Protein.RAD26, prob=.7),
+                    lambda x: None
+                ),
+            ],
+        )
+
+        # self.dna.add_event(
+        #     start=self.tss[0],
+        #     stop=self.tss[1],
+        #     target=Protein.RAD3,
+        #     new_prob=.0,
+        #     sc=Condition(Protein.POL2, 1, is_greater=True),
+        #     tc=Condition(Protein.POL2, 1, is_greater=False),
+        #     update_area='%s:%s' % (self.core_promoter[0], self.core_promoter[1])
+        # )
+
+        self.dna.add_event(
+            start=self.tss[0],
+            stop=self.tss[1],
+            target=Protein.RAD3,
+            new_prob=.0,
+            sc=Condition('', 1, is_greater=True),
+            tc=Condition('', 1, is_greater=False),
+            update_area='%s:%s' % (self.core_promoter[0], self.core_promoter[1])
+        )
+
+    def _init_transcript(self):
+        """
+        Define Transcript
+        :return: None
+        """
+        def pol2_callback(p):
+            if isinstance(p, Pol2):
+                p.set_position_delta(np.asarray([1.2 * Nucleus.INTERACT_RAD, .0]))
+
+        def complex_callback(p):
+            if p.species == '_'.join(sorted([Protein.POL2, Protein.RAD26])):
+                p.set_position_delta(np.asarray([1.2 * Nucleus.INTERACT_RAD, .0]))
+
+        # Pol2 and complex is pushed forward along transcript with pol2_callback/complex callback
+        # When Pol2/complex associates, the probability of staying on the transcript is increased by is set back to 0
+        # in case it dissociates
+        self.dna.add_action(
+            start=self.transcript[0],
+            stop=self.transcript[1],
+            target=Protein.POL2,
+            new_prob=.999,
+            callback=pol2_callback,
+            on_add=[Action(
+                Message(target=Protein.POL2, update='%s:%s' % (self.transcript[0], self.transcript[1]), prob=.999),
+                lambda x: None
+            )],
+            on_del=[Action(
+                Message(target=Protein.POL2, update='%s:%s' % (self.transcript[0], self.transcript[1]), prob=.0),
+                lambda x: None
+            )],
+        )
+
+        self.dna.add_action(
+            start=self.transcript[0],
+            stop=self.transcript[1],
+            target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
+            new_prob=.999,
+            callback=complex_callback,
+            on_add=[
+                Action(
+                    Message(
+                        target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
+                        update='%s:%s' % (self.transcript[0], self.transcript[1]),
+                        prob=.999
+                    ),
+                    lambda x: None
+                ),
+                Action(
+                    Message(Protein.POL2, update=Protein.RAD26, prob=.999),
+                    lambda x: None
+                ),
+            ],
+            on_del=[
+                Action(
+                    Message(
+                        target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
+                        update='%s:%s' % (self.transcript[0], self.transcript[1]),
+                        prob=.0
+                    ),
+                    lambda x: None
+                ),
+                Action(
+                    Message(Protein.POL2, update=Protein.RAD26, prob=.8),
+                    lambda x: None
+                ),
+            ],
+        )
+        # When anything associates to the tss (Pol2/complex), Rad3 doesn't need to bind anymore. This is intended to
+        # serve as a balance between continuously associating to the core promoter and dissociating.
+        self.dna.add_event(
+            start=self.transcript[0],
+            stop=self.transcript[1],
+            target=Protein.RAD3,
+            new_prob=.0,
+            sc=Condition('', 1, is_greater=True),
+            tc=Condition('', 1, is_greater=False),
+            update_area='%s:%s' % (self.core_promoter[0], self.core_promoter[1])
+        )
 
     def _fetch_pos(self):
         with multiprocessing.Pool(np.maximum(multiprocessing.cpu_count() - 1, 1)) as parallel:
@@ -85,18 +261,177 @@ class Nucleus:
     def global_event(self, target, update, prob):
         for i in range(len(self.proteins)):
             self.proteins[i].clear_messages()
-            self.proteins[i].add_message(target, update, prob)
+            if self.proteins[i].species == target:
+                self.proteins[i].add_message(target, update, prob)
 
     def global_event_obj(self, m):
         self.global_event(m.target, m.update, m.prob)
+
+    def radiate(self, damage_site_x=None):
+        """
+        Radiate cell
+        :param damage_site_x: Optional add start position of damage
+        :return: None
+        """
+        if damage_site_x is None:
+            damage_site_x = np.random.uniform(self.transcript[0], self.transcript[1] - .1)
+        damage_site = (damage_site_x, damage_site_x + .1)
+
+        # Stalling of Pol2/Complex
+        self.dna.add_action(
+            start=damage_site[0],
+            stop=damage_site[1],
+            target=Protein.POL2,
+            new_prob=1.,
+            callback=lambda x: None,
+            on_add=[Action(
+                Message(target=Protein.POL2, update='%s:%s' % (damage_site[0], damage_site[1]), prob=1.),
+                lambda x: None
+            )],
+            on_del=[Action(
+                Message(target=Protein.POL2, update='%s:%s' % (damage_site[0], damage_site[1]), prob=.0),
+                lambda x: None
+            )],
+            is_damage=True
+        )
+
+        self.dna.add_action(
+            start=damage_site[0],
+            stop=damage_site[1],
+            target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
+            new_prob=1.,
+            callback=lambda x: None,
+            on_add=[Action(
+                Message(
+                    target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
+                    update='%s:%s' % (damage_site[0], damage_site[1]),
+                    prob=1.
+                ),
+                lambda x: None
+            )],
+            on_del=[Action(
+                Message(
+                    target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
+                    update='%s:%s' % (damage_site[0], damage_site[1]),
+                    prob=.0
+                ),
+                lambda x: None
+            )],
+            is_damage=True
+        )
+
+        # Shutdown of transcription
+        self.dna.add_action(
+            start=self.tss[0],
+            stop=self.tss[1],
+            target=Protein.POL2,
+            new_prob=.0,
+            callback=lambda x: None,
+            on_add=[
+                Action(
+                    Message(target=Protein.POL2, update='%s:%s' % (self.tss[0], self.tss[1]), prob=.0),
+                    lambda x: None
+                ),
+                Action(
+                    Message(target=Protein.POL2, update='%s:%s' % (self.transcript[0], self.transcript[1]), prob=.0),
+                    lambda x: None
+                ),
+            ],
+        )
+
+        self.dna.add_action(
+            start=self.tss[0],
+            stop=self.tss[1],
+            target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
+            new_prob=.0,
+            callback=lambda x: None,
+            on_add=[
+                Action(
+                    Message(
+                        target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
+                        update='%s:%s' % (self.tss[0], self.tss[1]),
+                        prob=.0
+                    ),
+                    lambda x: None
+                ),
+                Action(
+                    Message(
+                        target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
+                        update='%s:%s' % (self.transcript[0], self.transcript[1]),
+                        prob=.0
+                    ),
+                    lambda x: None
+                ),
+            ],
+        )
+
+        # Remove Rad3 from core promoter
+        self.dna.add_action(
+            start=self.core_promoter[0],
+            stop=self.core_promoter[1],
+            target=Protein.RAD3,
+            new_prob=.0,
+            callback=lambda x: None,
+            on_add=[Action(
+                Message(target=Protein.RAD3, update='%s:%s' % (self.core_promoter[0], self.core_promoter[1]), prob=.0),
+                lambda x: None
+            )],
+        )
+
+        # Recruitment of Rad26 if not present
+        self.dna.add_event(
+            start=damage_site[0],
+            stop=damage_site[1],
+            target=Protein.RAD26,
+            new_prob=.9,
+            sc=Condition(Protein.POL2, 1, is_greater=True),
+            tc=Condition(Protein.RAD26, 1, is_greater=True),
+            is_damage=True
+        )
+
+        # Recruitment of Rad3 to lesion when Rad26 is present
+        self.dna.add_event(
+            start=damage_site[0],
+            stop=damage_site[1],
+            target=Protein.RAD3,
+            new_prob=.9,
+            sc=Condition(Protein.RAD26, 1, is_greater=True),
+            tc=Condition(Protein.RAD3, 2, is_greater=True),
+            is_damage=True
+        )
+
+        # Recruit no new Rad3 to core promoter
+        self.dna.add_event(
+            start=self.core_promoter[0],
+            stop=self.core_promoter[1],
+            target=Protein.RAD3,
+            new_prob=.0
+        )
+
+        # Global reset
+        self.global_event(
+            target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
+            update='%s:%s' % (self.tss[0], self.tss[1]),
+            prob=.0
+        )
+        self.global_event(
+            target=Protein.POL2,
+            update='%s:%s' % (self.tss[0], self.tss[1]),
+            prob=.0
+        )
+        self.global_event(
+            target=Protein.RAD3,
+            update='%s:%s' % (self.core_promoter[0], self.core_promoter[1]),
+            prob=.0
+        )
 
     def update(self):
         def handshake(x, y, k):
             m = self.proteins[x].broadcast(k)
             self.proteins[y].add_message_obj(m)
 
-        # Release all unstable connections
-        collapse_mask = np.asarray([x.is_collapsing() for x in self.proteins])
+        # Release all unstable connections that aren't associated to the dna
+        collapse_mask = np.asarray([x.is_collapsing() and not x.is_associated for x in self.proteins])
         idx = np.arange(len(self.proteins))
         rev_idx = np.flip(idx[collapse_mask])
         for i in rev_idx:
@@ -104,8 +439,7 @@ class Nucleus:
             del self.proteins[i]
 
         # Dissociate unstable connections
-        dissoc_prot = self.dna.dissociate()
-        self.proteins.extend(dissoc_prot)
+        self.dna.dissociate()
 
         # Fetch positions
         self._fetch_pos()
@@ -125,7 +459,6 @@ class Nucleus:
                     [self.proteins[i].add_message_obj(m) for m in mes]
                 if self.proteins[i].interact(seg):
                     self.dna.add_protein(self.proteins[i])
-                    self.proteins[i].is_associated = True
 
         asso_mask = np.asarray([x.is_associated for x in self.proteins])
         idx = np.arange(len(self.proteins))
@@ -225,64 +558,28 @@ class Nucleus:
         figure = plt.gcf()
         figure.canvas.flush_events()
         figure.canvas.draw()
+        if self.animation:
+            image = np.frombuffer(figure.canvas.tostring_rgb(), dtype='uint8')
+            image = image.reshape(figure.canvas.get_width_height()[::-1] + (3,))
+            self.gif.append(image)
         plt.cla()
+
+    def to_gif(self, path, save_prefix):
+        curr_dir = os.getcwd()
+        Path('%s/%s' % (curr_dir, path)).mkdir(exist_ok=True, parents=True)
+        imageio.mimsave("%s/%s_nucleus_ani.gif" % (path, save_prefix), self.gif, fps=5)
 
 
 def main():
-    nucleus = Nucleus([400, 200, 400, 200, 400, 200], t=.035)
-    # idx = np.random.choice(1200, size=200)
-    # [nucleus.proteins[i].add_message(target=Protein.RAD3, update=Protein.POL2, prob=1.) for i in idx]
-    for t in range(200):
-        if t == 50:
-            print('ADD DAMAGE')
-            # Add test damage
-            # Stalling of Pol2
-            nucleus.dna.add_action(
-                start=.45,
-                stop=.55,
-                target=Protein.POL2,
-                new_prob=1.,
-                callback=lambda x: None,
-                on_del=Action(
-                    Message(target=Protein.POL2, update='%s:%s' % (.45, .55), prob=.0),
-                    lambda x: None
-                ),
-                is_damage=True
-            )
-            # Shutdown of transcription
-            nucleus.dna.add_event(
-                start=.45,
-                stop=.55,
-                target=Protein.POL2,
-                new_prob=.0,
-                sc=Condition(Pol2, 1, is_greater=True),
-                is_damage=True,
-                update_area='%s:%s' % (.1, .125)
-            )
-            # Remove Rad3 from core promoter
-            nucleus.dna.add_event(
-                start=.45,
-                stop=.55,
-                target=Protein.RAD3,
-                new_prob=.0,
-                sc=Condition(Pol2, 1, is_greater=True),
-                is_damage=True,
-                update_area='%s:%s' % (.0, .1)
-            )
-            # Recruitment of Rad3 to lesion
-            nucleus.dna.add_event(
-                start=.45,
-                stop=.55,
-                target=Protein.RAD3,
-                new_prob=.9,
-                sc=Condition(Pol2, 1, is_greater=True),
-                tc=Condition(Rad3, 2, is_greater=True),
-                is_damage=True
-            )
-            nucleus.global_event(Protein.POL2, '%s:%s' % (.1, .125), .0)
-            nucleus.global_event(Protein.RAD3, '%s:%s' % (.0, .1), .0)
+    nucleus = Nucleus([500, 200, 500, 200, 500, 200], t=.035, animation=True)
+    for t in range(150):
+        if t == 100:
+            print('########################### ADD DAMAGE')
+            nucleus.radiate()
         nucleus.update()
         nucleus.display()
+
+    nucleus.to_gif('animations', 'example')
 
 
 if __name__ == '__main__':
