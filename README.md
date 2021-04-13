@@ -22,6 +22,8 @@ or protein:DNA interactions. In order to make information transfer efficient, it
 densely packed with proteins that could receive and send information. All proteins move constantly and randomly 
 through the space in the nucleus. This is why it is called the Dense Nucleus model.
 
+![Random interactions in the cellular nucleus](animations/random_interaction_dna_example_nucleus_ani.gif)
+
 ### Messages
 Messages contain information for a target protein how it is supposed to update its interaction profile. For example, 
 a message could contain the information that a Rad3 protein is supposed to update its interaction probability with
@@ -78,4 +80,13 @@ definition.
 ### Cell Culture/Petri dish
 All these processes can be run in parallel for several cells at one time. Hence, associated proteins can be anlysed
 among several cells in a simulated cell culture. This produces simulated sequencing data like ChIP-seq and SLAM-seq
-signals. This feature has not been implemented though.
+signals. Note that some processes need some time to appear in the simulated sequencing data. The example below
+needs around 20 update steps until the behaviour of Rad3 (association to the core promoter between 0.0 and 0.1) and Pol2
+(association to the TSS between 0.1 and 0.15 and successive elongation) is perceivable. After 40 time steps, the cell
+is radiated (lesion site between 0.4 and 0.5).  If Pol2(-Rad26) moves on the DNA damage, Pol2(-Rad26) is stalled. Rad26
+must be present at the lesion before Rad3 is recruited. That means that if Rad26 is already present (because the
+Pol2-Rad26 complex got stalled), Rad3 can be recruited right away. Otherwise, Rad26 needs to be associated first 
+before Rad3 can attach. This becomes clear trhough the ChIP-seq peaks between 0.4 and 0.5 that start to build up after 
+time step 40.
+
+![Simulated ChIP-seq data](animations/example_chipseq_ani.gif)
