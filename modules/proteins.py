@@ -75,7 +75,7 @@ class Protein(AbstractProtein, ABC):
         :type p_update: float
         :return: None
         """
-        print('UPDATE INTERACTION PROBABILITY %s, %s, %s.' % (self.species, species, p_update))
+        # print('UPDATE INTERACTION PROBABILITY %s, %s, %s.' % (self.species, species, p_update))
         self.p_inter[species] = p_update
 
     def set_position_delta(self, delta):
@@ -297,7 +297,7 @@ class ProteinComplex(AbstractProteinComplex):
         :type p_update: float
         :return: Npne
         """
-        print('UPDATE INTERACTION PROBABILITY %s, %s, %s.' % (self.species, species, p_update))
+        # print('UPDATE INTERACTION PROBABILITY %s, %s, %s.' % (self.species, species, p_update))
         self.p_complex[species] = p_update
 
     def set_position_delta(self, delta):
@@ -388,7 +388,7 @@ class ProteinComplex(AbstractProteinComplex):
         try:
             [x.del_message(key) for x in self.prot_list]
         except KeyError:
-            print('Different number of messages in complex')
+            # print('Different number of messages in complex')
             pass
 
     def clear_messages(self):
@@ -538,7 +538,7 @@ class Pol2(Protein):
                 Protein.IC_POL2: .05,
                 Protein.RAD26: .7,
                 Protein.IC_RAD26: .05,
-                '%s:%s' % (.0, 1.): .05,  # Some random interaction with the DNA
+                '%s:%s' % (.0, 1.): .005,  # Some random interaction with the DNA
             }
 
         if p_info is None:
