@@ -14,6 +14,30 @@ from modules.dna import *
 from modules.messengers import *
 
 
+def empty(p):
+    return None
+
+
+def pol2_callback(p):
+    if isinstance(p, Pol2):
+        p.set_position_delta(np.asarray([1.4 * Nucleus.INTERACT_RAD, .0]))
+
+
+def pol2_slow_callback(p):
+    if isinstance(p, Pol2):
+        p.set_position_delta(np.asarray([.7 * Nucleus.INTERACT_RAD, .0]))
+
+
+def complex_callback(p):
+    if p.species == '_'.join(sorted([Protein.POL2, Protein.RAD26])):
+        p.set_position_delta(np.asarray([1.4 * Nucleus.INTERACT_RAD, .0]))
+
+
+def complex_slow_callback(p):
+    if p.species == '_'.join(sorted([Protein.POL2, Protein.RAD26])):
+        p.set_position_delta(np.asarray([.7 * Nucleus.INTERACT_RAD, .0]))
+
+
 class Nucleus:
     INTERACT_RAD = .015
 
@@ -51,10 +75,12 @@ class Nucleus:
         self.core_promoter = (.0, .1)
         self.tss = (.1, .15)
         self.transcript = (.1, .85)
+        self.tts = (.80, 1.)
 
         self._init_core_promoter()
         self._init_tss()
         self._init_transcript()
+        self._init_tts()
 
         self.pos = []
         self.state = None
@@ -71,7 +97,7 @@ class Nucleus:
             start=self.core_promoter[0],
             stop=self.core_promoter[1],
             target=Protein.RAD3,
-            new_prob=.9,
+            new_prob=.5,
             sc=Condition(Protein.RAD3, 1, is_greater=False),
             tc=Condition(Protein.RAD3, 1, is_greater=True)
         )
@@ -81,7 +107,7 @@ class Nucleus:
             start=self.core_promoter[0],
             stop=self.core_promoter[1],
             target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
-            new_prob=.9,
+            new_prob=.7,
             sc=Condition(Protein.RAD3, 1, is_greater=True),
             tc=Condition(Protein.RAD3, 1, is_greater=False),
             update_area='%s:%s' % (self.tss[0], self.tss[1])
@@ -90,7 +116,7 @@ class Nucleus:
             start=self.core_promoter[0],
             stop=self.core_promoter[1],
             target=Protein.POL2,
-            new_prob=.9,
+            new_prob=.5,
             sc=Condition(Protein.RAD3, 1, is_greater=True),
             tc=Condition(Protein.RAD3, 1, is_greater=False),
             update_area='%s:%s' % (self.tss[0], self.tss[1])
@@ -108,23 +134,23 @@ class Nucleus:
             start=self.tss[0],
             stop=self.tss[1],
             target=Protein.POL2,
-            new_prob=.999,
-            callback=lambda x: None,
+            new_prob=.9,
+            callback=empty,
             on_add=[Action(
                 Message(
                     target=Protein.POL2,
                     update='%s:%s' % (self.tss[0], self.tss[1]),
-                    prob=.999
+                    prob=.9
                 ),
-                lambda x: None
+                callback=empty
                 )],
             on_del=[Action(
                 Message(
                     target=Protein.POL2,
                     update='%s:%s' % (self.tss[0], self.tss[1]),
-                    prob=.0
+                    prob=.05
                 ),
-                lambda x: None
+                callback=empty
             )]
         )
 
@@ -133,20 +159,20 @@ class Nucleus:
             start=self.tss[0],
             stop=self.tss[1],
             target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
-            new_prob=.999,
-            callback=lambda x: None,
+            new_prob=.9,
+            callback=empty,
             on_add=[
                 Action(
                     Message(
                         target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
                         update='%s:%s' % (self.tss[0], self.tss[1]),
-                        prob=.999
+                        prob=.9
                     ),
-                    lambda x: None
+                    callback=empty
                 ),
                 Action(
-                    Message(Protein.POL2, update=Protein.RAD26, prob=.999),
-                    lambda x: None
+                    Message(Protein.POL2, update=Protein.RAD26, prob=.9),
+                    callback=empty
                 ),
             ],
             on_del=[
@@ -154,13 +180,13 @@ class Nucleus:
                     Message(
                         target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
                         update='%s:%s' % (self.tss[0], self.tss[1]),
-                        prob=.0
+                        prob=.05
                     ),
-                    lambda x: None
+                    callback=empty
                 ),
                 Action(
                     Message(Protein.POL2, update=Protein.RAD26, prob=.7),
-                    lambda x: None
+                    callback=empty
                 ),
             ],
         )
@@ -169,7 +195,7 @@ class Nucleus:
             start=self.tss[0],
             stop=self.tss[1],
             target=Protein.RAD3,
-            new_prob=.0,
+            new_prob=.05,
             sc=Condition('', 1, is_greater=True),
             tc=Condition('', 1, is_greater=False),
             update_area='%s:%s' % (self.core_promoter[0], self.core_promoter[1])
@@ -180,14 +206,6 @@ class Nucleus:
         Define Transcript
         :return: None
         """
-        def pol2_callback(p):
-            if isinstance(p, Pol2):
-                p.set_position_delta(np.asarray([1.4 * Nucleus.INTERACT_RAD, .0]))
-
-        def complex_callback(p):
-            if p.species == '_'.join(sorted([Protein.POL2, Protein.RAD26])):
-                p.set_position_delta(np.asarray([1.4 * Nucleus.INTERACT_RAD, .0]))
-
         # Pol2 and complex is pushed forward along transcript with pol2_callback/complex callback
         # When Pol2/complex associates, the probability of staying on the transcript is increased by is set back to 0
         # in case it dissociates
@@ -195,15 +213,15 @@ class Nucleus:
             start=self.transcript[0],
             stop=self.transcript[1],
             target=Protein.POL2,
-            new_prob=.999,
+            new_prob=.9,
             callback=pol2_callback,
             on_add=[Action(
-                Message(target=Protein.POL2, update='%s:%s' % (self.transcript[0], self.transcript[1]), prob=.999),
-                lambda x: None
+                Message(target=Protein.POL2, update='%s:%s' % (self.transcript[0], self.transcript[1]), prob=.9),
+                callback=empty
             )],
             on_del=[Action(
-                Message(target=Protein.POL2, update='%s:%s' % (self.transcript[0], self.transcript[1]), prob=.0),
-                lambda x: None
+                Message(target=Protein.POL2, update='%s:%s' % (self.transcript[0], self.transcript[1]), prob=.05),
+                callback=empty
             )],
         )
 
@@ -211,20 +229,20 @@ class Nucleus:
             start=self.transcript[0],
             stop=self.transcript[1],
             target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
-            new_prob=.999,
+            new_prob=.9,
             callback=complex_callback,
             on_add=[
                 Action(
                     Message(
                         target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
                         update='%s:%s' % (self.transcript[0], self.transcript[1]),
-                        prob=.999
+                        prob=.9
                     ),
-                    lambda x: None
+                    callback=empty
                 ),
                 Action(
-                    Message(Protein.POL2, update=Protein.RAD26, prob=.999),
-                    lambda x: None
+                    Message(Protein.POL2, update=Protein.RAD26, prob=.9),
+                    callback=empty
                 ),
             ],
             on_del=[
@@ -232,13 +250,13 @@ class Nucleus:
                     Message(
                         target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
                         update='%s:%s' % (self.transcript[0], self.transcript[1]),
-                        prob=.0
+                        prob=.05
                     ),
-                    lambda x: None
+                    callback=empty
                 ),
                 Action(
-                    Message(Protein.POL2, update=Protein.RAD26, prob=.8),
-                    lambda x: None
+                    Message(Protein.POL2, update=Protein.RAD26, prob=.7),
+                    callback=empty
                 ),
             ],
         )
@@ -248,10 +266,68 @@ class Nucleus:
             start=self.transcript[0],
             stop=self.transcript[1],
             target=Protein.RAD3,
-            new_prob=.0,
+            new_prob=.05,
             sc=Condition('', 1, is_greater=True),
             tc=Condition('', 1, is_greater=False),
             update_area='%s:%s' % (self.core_promoter[0], self.core_promoter[1])
+        )
+
+    def _init_tts(self):
+        """
+        Define transcription termination site
+        :return: None
+        """
+
+        # When Pol2 is associated, probability decreased to stay associated
+        self.dna.add_action(
+            start=self.tts[0],
+            stop=self.tts[1],
+            target=Protein.POL2,
+            new_prob=.05,
+            callback=empty,
+            on_add=[Action(
+                Message(
+                    target=Protein.POL2,
+                    update='%s:%s' % (self.tts[0], self.tts[1]),
+                    prob=.05
+                ),
+                callback=empty
+            ),
+            Action(
+                Message(
+                    target=Protein.POL2,
+                    update='%s:%s' % (self.transcript[0], self.transcript[1]),
+                    prob=.05
+                ),
+                callback=empty
+            )],
+        )
+
+        # Similar for the Pol2-Rad26 complex but also increase interaction probability for complex
+        self.dna.add_action(
+            start=self.tts[0],
+            stop=self.tts[1],
+            target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
+            new_prob=.05,
+            callback=empty,
+            on_add=[
+                Action(
+                    Message(
+                        target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
+                        update='%s:%s' % (self.tts[0], self.tts[1]),
+                        prob=.05
+                    ),
+                    callback=empty
+                ),
+                Action(
+                    Message(
+                        target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
+                        update='%s:%s' % (self.transcript[0], self.transcript[1]),
+                        prob=.05
+                    ),
+                    callback=empty
+                ),
+            ],
         )
 
     def _fetch_pos(self):
@@ -259,14 +335,7 @@ class Nucleus:
         Retrieve the position of all proteins and represent it in a list as well as a KD tree
         :return: None
         """
-        with multiprocessing.Pool(np.maximum(multiprocessing.cpu_count() - 1, 1)) as parallel:
-            results = []
-            for p in self.proteins:
-                res = parallel.apply_async(p.get_position, args=())
-                results.append(res)
-            parallel.close()
-            parallel.join()
-            self.pos = [r.get() for r in results]
+        self.pos = [p.get_position() for p in self.proteins]
         self.state = KDTree(np.asarray(self.pos))
 
     def global_event(self, target, update, prob):
@@ -313,15 +382,15 @@ class Nucleus:
             start=damage_site[0],
             stop=damage_site[1],
             target=Protein.POL2,
-            new_prob=1.,
-            callback=lambda x: None,
+            new_prob=.99,
+            callback=empty,
             on_add=[Action(
-                Message(target=Protein.POL2, update='%s:%s' % (damage_site[0], damage_site[1]), prob=1.),
-                lambda x: None
+                Message(target=Protein.POL2, update='%s:%s' % (damage_site[0], damage_site[1]), prob=.99),
+                callback=empty
             )],
             on_del=[Action(
-                Message(target=Protein.POL2, update='%s:%s' % (damage_site[0], damage_site[1]), prob=.0),
-                lambda x: None
+                Message(target=Protein.POL2, update='%s:%s' % (damage_site[0], damage_site[1]), prob=.05),
+                callback=empty
             )],
             is_damage=True
         )
@@ -330,23 +399,23 @@ class Nucleus:
             start=damage_site[0],
             stop=damage_site[1],
             target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
-            new_prob=1.,
-            callback=lambda x: None,
+            new_prob=.99,
+            callback=empty,
             on_add=[Action(
                 Message(
                     target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
                     update='%s:%s' % (damage_site[0], damage_site[1]),
-                    prob=1.
+                    prob=.99
                 ),
-                lambda x: None
+                callback=empty
             )],
             on_del=[Action(
                 Message(
                     target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
                     update='%s:%s' % (damage_site[0], damage_site[1]),
-                    prob=.0
+                    prob=.05
                 ),
-                lambda x: None
+                callback=empty
             )],
             is_damage=True
         )
@@ -356,16 +425,16 @@ class Nucleus:
             start=self.tss[0],
             stop=self.tss[1],
             target=Protein.POL2,
-            new_prob=.0,
-            callback=lambda x: None,
+            new_prob=.05,
+            callback=empty,
             on_add=[
                 Action(
-                    Message(target=Protein.POL2, update='%s:%s' % (self.tss[0], self.tss[1]), prob=.0),
-                    lambda x: None
+                    Message(target=Protein.POL2, update='%s:%s' % (self.tss[0], self.tss[1]), prob=.05),
+                    callback=empty
                 ),
                 Action(
-                    Message(target=Protein.POL2, update='%s:%s' % (self.transcript[0], self.transcript[1]), prob=.0),
-                    lambda x: None
+                    Message(target=Protein.POL2, update='%s:%s' % (self.transcript[0], self.transcript[1]), prob=.05),
+                    callback=empty
                 ),
             ],
         )
@@ -374,24 +443,77 @@ class Nucleus:
             start=self.tss[0],
             stop=self.tss[1],
             target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
-            new_prob=.0,
-            callback=lambda x: None,
+            new_prob=.05,
+            callback=empty,
             on_add=[
                 Action(
                     Message(
                         target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
                         update='%s:%s' % (self.tss[0], self.tss[1]),
-                        prob=.0
+                        prob=.05
                     ),
-                    lambda x: None
+                    callback=empty
                 ),
                 Action(
                     Message(
                         target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
                         update='%s:%s' % (self.transcript[0], self.transcript[1]),
-                        prob=.0
+                        prob=.05
                     ),
-                    lambda x: None
+                    callback=empty
+                ),
+            ],
+        )
+
+        # If Pol2 associates, it moves much slower and associates less stablily
+        self.dna.add_action(
+            start=self.transcript[0],
+            stop=self.transcript[1],
+            target=Protein.POL2,
+            new_prob=.6,
+            callback=pol2_slow_callback,
+            on_add=[Action(
+                Message(target=Protein.POL2, update='%s:%s' % (self.transcript[0], self.transcript[1]), prob=.6),
+                callback=empty
+            )],
+            on_del=[Action(
+                Message(target=Protein.POL2, update='%s:%s' % (self.transcript[0], self.transcript[1]), prob=.05),
+                callback=empty
+            )],
+        )
+
+        self.dna.add_action(
+            start=self.transcript[0],
+            stop=self.transcript[1],
+            target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
+            new_prob=.6,
+            callback=complex_slow_callback,
+            on_add=[
+                Action(
+                    Message(
+                        target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
+                        update='%s:%s' % (self.transcript[0], self.transcript[1]),
+                        prob=.6
+                    ),
+                    callback=empty
+                ),
+                Action(
+                    Message(Protein.POL2, update=Protein.RAD26, prob=.9),
+                    callback=empty
+                ),
+            ],
+            on_del=[
+                Action(
+                    Message(
+                        target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
+                        update='%s:%s' % (self.transcript[0], self.transcript[1]),
+                        prob=.05
+                    ),
+                    callback=empty
+                ),
+                Action(
+                    Message(Protein.POL2, update=Protein.RAD26, prob=.7),
+                    callback=empty
                 ),
             ],
         )
@@ -401,11 +523,11 @@ class Nucleus:
             start=self.core_promoter[0],
             stop=self.core_promoter[1],
             target=Protein.RAD3,
-            new_prob=.0,
-            callback=lambda x: None,
+            new_prob=.05,
+            callback=empty,
             on_add=[Action(
-                Message(target=Protein.RAD3, update='%s:%s' % (self.core_promoter[0], self.core_promoter[1]), prob=.0),
-                lambda x: None
+                Message(target=Protein.RAD3, update='%s:%s' % (self.core_promoter[0], self.core_promoter[1]), prob=.05),
+                callback=empty
             )],
         )
 
@@ -414,7 +536,7 @@ class Nucleus:
             start=damage_site[0],
             stop=damage_site[1],
             target=Protein.RAD26,
-            new_prob=.9,
+            new_prob=.5,
             sc=Condition(Protein.POL2, 1, is_greater=True),
             tc=Condition(Protein.RAD26, 1, is_greater=True),
             is_damage=True
@@ -425,7 +547,7 @@ class Nucleus:
             start=damage_site[0],
             stop=damage_site[1],
             target=Protein.RAD3,
-            new_prob=.9,
+            new_prob=.5,
             sc=Condition(Protein.RAD26, 1, is_greater=True),
             tc=Condition(Protein.RAD3, 2, is_greater=True),
             is_damage=True
@@ -436,25 +558,33 @@ class Nucleus:
             start=self.core_promoter[0],
             stop=self.core_promoter[1],
             target=Protein.RAD3,
-            new_prob=.0
+            new_prob=.05
         )
 
         # Global reset
         self.global_event(
             target='_'.join(sorted([Protein.POL2, Protein.RAD26])),
             update='%s:%s' % (self.tss[0], self.tss[1]),
-            prob=.0
+            prob=.05
         )
         self.global_event(
             target=Protein.POL2,
             update='%s:%s' % (self.tss[0], self.tss[1]),
-            prob=.0
+            prob=.05
         )
         self.global_event(
             target=Protein.RAD3,
             update='%s:%s' % (self.core_promoter[0], self.core_promoter[1]),
-            prob=.0
+            prob=.05
         )
+
+        return self
+
+    def get_associated(self, prot_type, is_complex=False):
+        positions = []
+        for seg in self.dna:
+            positions.extend(seg.associated_proteins(prot_type=prot_type, is_complex=is_complex))
+        return positions
 
     def update(self):
         """
@@ -556,6 +686,8 @@ class Nucleus:
         for si in sorted(list(success_inter), reverse=True):
             del self.proteins[si]
 
+        return self
+
     def display(self):
         """
         Display state nucleus state. Matplotlib is continuously updated. Therefore, process is not blocked by
@@ -563,16 +695,7 @@ class Nucleus:
         gif.
         :return: None
         """
-        results = []
-        with multiprocessing.Pool(np.maximum(multiprocessing.cpu_count() - 1, 1)) as parallel:
-            for p in self.proteins:
-                res = parallel.apply_async(p.get_features, args=())
-                results.append(res)
-
-            parallel.close()
-            parallel.join()
-            results = [r.get() for r in results]
-
+        results = [p.get_features() for p in self.proteins]
         recruited = [p.get_features() for seg in self.dna for p in seg.proteins]
         if not recruited:
             x_recruited, y_recruited, c_recruited = [], [], []
@@ -634,24 +757,90 @@ class Nucleus:
 
 
 class PetriDish:
-    def __init__(self, num_cells, composition=None, t=.035):
+    def __init__(self, num_cells, composition=None, t=.035, animate=False):
+        plt.ion()
         if composition is None:
             self.composition = [500, 200, 500, 200, 500, 200]
         else:
             self.composition = composition
-        self.culture = [Nucleus(composition, t=t, animation=False) for _ in range(num_cells)]
+        self.culture = [Nucleus(self.composition, t=t, animation=False) for _ in range(num_cells)]
+        self.figure, self.ax = plt.subplots(3, 1)
+        self.animate = animate
+        self.gif = []
+
+    def chip(self, prot_type, bins=100, color='tab:orange', is_complex=False, time_step=None):
+        with multiprocessing.Pool(np.maximum(multiprocessing.cpu_count() - 2, 1)) as parallel:
+            fetched_rad3 = parallel.starmap(Nucleus.get_associated, zip(
+                self.culture, [Protein.RAD3] * len(self.culture), [is_complex] * len(self.culture)))
+            fetched_rad26 = parallel.starmap(Nucleus.get_associated, zip(
+                self.culture, [Protein.RAD26] * len(self.culture), [is_complex] * len(self.culture)))
+            fetched_pol2 = parallel.starmap(Nucleus.get_associated, zip(
+                self.culture, [Protein.POL2] * len(self.culture), [is_complex] * len(self.culture)))
+
+        fetched_rad3 = [f for fetch in fetched_rad3 for f in fetch]
+        fetched_pol2 = [f for fetch in fetched_pol2 for f in fetch]
+        fetched_rad26 = [f for fetch in fetched_rad26 for f in fetch]
+        self.ax[0].hist(fetched_rad3, bins=bins, range=(0, 1), color='tab:orange')
+        self.ax[1].hist(fetched_pol2, bins=bins, range=(0, 1), color='tab:green')
+        self.ax[2].hist(fetched_rad26, bins=bins, range=(0, 1), color='cyan')
+        self.ax[0].set_title('ChIP Rad3%s' % (' Time Step ' + str(time_step)) if time_step is not None else '')
+        self.ax[1].set_title('ChIP Pol2')
+        self.ax[2].set_title('ChIP Rad26')
+        self.figure.tight_layout()
+        self.figure.canvas.flush_events()
+        self.figure.canvas.draw()
+        if self.animate:
+            image = np.frombuffer(self.figure.canvas.tostring_rgb(), dtype='uint8')
+            image = image.reshape(self.figure.canvas.get_width_height()[::-1] + (3,))
+            self.gif.append(image)
+        [ax.cla() for ax in self.ax]
+
+    def simulate(self):
+        with multiprocessing.Pool(np.maximum(multiprocessing.cpu_count() - 2, 1)) as parallel:
+            self.culture = parallel.map(Nucleus.update, self.culture)
+
+    def radiate(self):
+        with multiprocessing.Pool(np.maximum(multiprocessing.cpu_count() - 2, 1)) as parallel:
+            self.culture = parallel.starmap(Nucleus.radiate, zip(self.culture, [.4] * len(self.culture)))
+
+    def to_gif(self, path, save_prefix):
+        """
+        Convert buffered plots (created through running the display function) to a gif. Only possible if
+        plots were already created and buffered. Therefore, self.animation must be set to true.
+        :param path: Path from current directory where gif is to be stored. If it doesn't exist, directories
+        (including parent directories) are created.
+        :type path: str
+        :param save_prefix: Identifier that is put at the beginning of the set file
+        :type save_prefix: str
+        :return: None
+        """
+        if self.gif:
+            curr_dir = os.getcwd()
+            Path('%s/%s' % (curr_dir, path)).mkdir(exist_ok=True, parents=True)
+            imageio.mimsave("%s/%s_chipseq_ani.gif" % (path, save_prefix), self.gif, fps=1)
 
 
 def main():
-    nucleus = Nucleus([500, 200, 500, 200, 500, 200], t=.035, animation=False)
-    for t in range(150):
-        if t == 100:
-            print('########################### ADD DAMAGE')
-            nucleus.radiate()
-        nucleus.update()
-        nucleus.display()
+    # nucleus = Nucleus([500, 200, 500, 200, 500, 200], t=.035, animation=False)
+    # for t in range(150):
+    #     if t == 100:
+    #         print('########################### ADD DAMAGE')
+    #         nucleus.radiate()
+    #     nucleus.update()
+    #     nucleus.display()
+    #
+    # nucleus.to_gif('animations', 'example')
 
-    nucleus.to_gif('animations', 'example')
+    petri_dish = PetriDish(100, animate=True)
+    for t in range(80):
+        print(t)
+        if t == 40:
+            print('########################### ADD DAMAGE')
+            petri_dish.radiate()
+        petri_dish.simulate()
+        petri_dish.chip(Protein.RAD3, bins=100, time_step=t)
+
+    petri_dish.to_gif('animations', 'slow_elong_')
 
 
 if __name__ == '__main__':
