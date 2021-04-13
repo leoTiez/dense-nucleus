@@ -154,7 +154,8 @@ class DNASegment(AbstractDNASegment):
                     messages.append(e.message)
 
         if not messages:
-            print('Emit no messages')
+            pass
+            # print('Emit no messages')
         return messages
 
     def act(self):
@@ -184,6 +185,25 @@ class DNASegment(AbstractDNASegment):
                     if not a.tc(self.proteins):
                         apply_action()
 
+    def associated_proteins(self, prot_type, is_complex=False):
+        positions = []
+        for p in self.proteins:
+            if is_complex:
+                if p.species == prot_type:
+                    positions.append(p.get_position()[0])
+            else:
+                if isinstance(p, AbstractProtein):
+                    if p.species == prot_type:
+                        positions.append(p.get_position()[0])
+                elif isinstance(p, AbstractProteinComplex):
+                    species = [cp.species for cp in p.prot_list]
+                    if prot_type in species:
+                        positions.append(p.get_position()[0])
+                else:
+                    raise ValueError('Associated protein is neither of type Protein nor of type ProteinComplex')
+
+        return positions
+
 
 class DNA:
     def __init__(self):
@@ -194,9 +214,8 @@ class DNA:
         self.dna_segments = {}
         p = index.Property()
         p.dimension = 2
-        self.segment_tree = index.Index(interleaved=True, properties=p)
-        self.damage_tree = index.Index(interleaved=True, properties=p)
         self.id_map = {}
+        self.id_damage_map = {}
         # Init whole dna
         self.add_empty_segments(.0, 1.)
 
@@ -207,6 +226,11 @@ class DNA:
         """
         return self.dna_segments.values().__iter__()
 
+    @staticmethod
+    def _is_in_area(area_key, pos):
+        boundaries = area_key.split(':')
+        return float(boundaries[0]) <= pos <= float(boundaries[1])
+
     def _get_overlap(self, p):
         """
         Get all segments with which the protein overlaps
@@ -215,7 +239,7 @@ class DNA:
         :return: List with segment ids
         """
         pos = p.get_position()[0]
-        return self.segment_tree.intersection((pos, .5, pos + DNASegment.SEGMENT_UNIT, .5))
+        return [i for i in self.id_map.keys() if self._is_in_area(self.id_map[i], pos)]
 
     def _get_damage_overlap(self, p):
         """
@@ -225,7 +249,7 @@ class DNA:
         :return: List with damage segment ids
         """
         pos = p.get_position()[0]
-        return list(self.damage_tree.intersection((pos, .5, pos + DNASegment.SEGMENT_UNIT, .5)))
+        return [i for i in self.id_damage_map.keys() if self._is_in_area(self.id_damage_map[i], pos)]
 
     def _damage_handling(self, damage_segments, p):
         """
@@ -251,7 +275,6 @@ class DNA:
         :type stop: float
         :return: None
         """
-        self.segment_tree.insert(len(self.dna_segments.keys()), (start, .49, stop, .51))
         self.id_map[len(self.dna_segments.keys())] = '%s:%s' % (start, stop)
         self.dna_segments['%s:%s' % (start, stop)] = DNASegment(start, stop)
 
@@ -414,10 +437,9 @@ class DNA:
         stop = float(stop)
         key = '%s:%s' % (start, stop)
         if key not in self.dna_segments.keys():
-            self.segment_tree.insert(len(self.dna_segments.keys()), (start, .49, stop, .51))
             self.id_map[len(self.dna_segments.keys())] = key
             if is_damage:
-                self.damage_tree.insert(len(self.dna_segments.keys()), (start, .49, stop, .51))
+                self.id_damage_map[len(self.dna_segments.keys())] = key
             if event is not None:
                 self.dna_segments[key] = DNASegment(
                     start,
