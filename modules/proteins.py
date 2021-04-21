@@ -15,6 +15,15 @@ class Protein(AbstractProtein, ABC):
     RAD26 = 'rad26'
     IC_RAD26 = 'ic rad26'
 
+    COLORS = {
+        RAD3: 'orange',
+        IC_RAD3: 'grey',  # 'lightsalmon'
+        POL2: 'green',
+        IC_POL2: 'grey',  # 'springgreen'
+        RAD26: 'cyan',
+        IC_RAD26: 'grey',  # 'lightblue'
+    }
+
     def __init__(self, species, p_inter, p_info, color, pos_dim=2):
         """
         Abstract Protein class.
@@ -480,7 +489,7 @@ class Rad3(Protein):
                 Protein.RAD26: .1,
                 Protein.IC_RAD26: .1,
             }
-        super().__init__(Protein.RAD3, p_inter, p_info, 'orange', pos_dim)
+        super().__init__(Protein.RAD3, p_inter, p_info, Protein.COLORS[Protein.RAD3], pos_dim)
 
 
 class InfoRad3(InfoProtein):
@@ -514,8 +523,7 @@ class InfoRad3(InfoProtein):
                 Protein.RAD26: .1,
                 Protein.IC_RAD26: .9,
             }
-        # super().__init__(Protein.IC_RAD3, p_inter, p_info, 'lightsalmon', pos_dim)
-        super().__init__(Protein.IC_RAD3, p_inter, p_info, 'grey', pos_dim)
+        super().__init__(Protein.IC_RAD3, p_inter, p_info, Protein.COLORS[Protein.IC_RAD3], pos_dim)
 
 
 class Pol2(Protein):
@@ -550,8 +558,7 @@ class Pol2(Protein):
                 Protein.RAD26: .1,
                 Protein.IC_RAD26: .1,
             }
-        super().__init__(Protein.POL2, p_inter, p_info, 'green', pos_dim)
-        # super().__init__(Protein.POL2, p_inter, p_info, 'grey', pos_dim)
+        super().__init__(Protein.POL2, p_inter, p_info, Protein.COLORS[Protein.POL2], pos_dim)
 
 
 class InfoPol2(InfoProtein):
@@ -585,8 +592,7 @@ class InfoPol2(InfoProtein):
                 Protein.RAD26: .1,
                 Protein.IC_RAD26: .9,
             }
-        # super().__init__(Protein.IC_POL2, p_inter, p_info, 'springgreen', pos_dim)
-        super().__init__(Protein.IC_POL2, p_inter, p_info, 'grey', pos_dim)
+        super().__init__(Protein.IC_POL2, p_inter, p_info, Protein.COLORS[Protein.IC_POL2], pos_dim)
 
 
 class Rad26(Protein):
@@ -620,8 +626,7 @@ class Rad26(Protein):
                 Protein.RAD26: .3,
                 Protein.IC_RAD26: .9,
             }
-        super().__init__(Protein.RAD26, p_inter, p_info, 'cyan', pos_dim)
-        # super().__init__(Protein.RAD26, p_inter, p_info, 'grey', pos_dim)
+        super().__init__(Protein.RAD26, p_inter, p_info, Protein.COLORS[Protein.RAD26], pos_dim)
 
 
 class InfoRad26(InfoProtein):
@@ -656,8 +661,7 @@ class InfoRad26(InfoProtein):
                 Protein.RAD26: .9,
                 Protein.IC_RAD26: .9
             }
-        # super().__init__(Protein.IC_POL2, p_inter, p_info, 'lightblue', pos_dim)
-        super().__init__(Protein.IC_POL2, p_inter, p_info, 'grey', pos_dim)
+        super().__init__(Protein.IC_RAD26, p_inter, p_info, Protein.COLORS[Protein.IC_RAD26], pos_dim)
 
 
 class ProteinFactory:
