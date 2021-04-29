@@ -2,4 +2,3 @@ numpy>=1.19
 matplotlib>=3.3
 networkx>=2.5
 scikit-learn>=0.23
-Rtree>=0.9
