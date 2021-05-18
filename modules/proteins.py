@@ -9,10 +9,16 @@ from modules.messengers import *
 
 class Protein(AbstractProtein, ABC):
     RAD3 = 'rad3'
-    IC_RAD3 = 'ic rad3'
     POL2 = 'pol2'
-    IC_POL2 = 'ic pol2'
     RAD26 = 'rad26'
+    RAD4 = 'rad4'
+    RAD10 = 'rad10'
+    RAD2 = 'rad2'
+    DNA_POL = 'poly'
+    DNA_LIG = 'cdc9'
+
+    IC_RAD3 = 'ic rad3'
+    IC_POL2 = 'ic pol2'
     IC_RAD26 = 'ic rad26'
 
     COLORS = {
@@ -238,6 +244,15 @@ class Protein(AbstractProtein, ABC):
         :return: List with pre-defined protein types
         """
         return [Protein.RAD3, Protein.IC_RAD3, Protein.POL2, Protein.IC_POL2, Protein.RAD26, Protein.IC_RAD26]
+
+    @staticmethod
+    def get_types_gillespie():
+        """
+        Get pre-defined protein types for the Gillespie algorithm
+        :return: List with pre-defined protein types
+        """
+        return [Protein.RAD3, Protein.POL2, Protein.RAD26, Protein.RAD4,
+                Protein.RAD10, Protein.RAD2, Protein.DNA_POL, Protein.DNA_LIG]
 
 
 class ProteinComplex(AbstractProteinComplex):
