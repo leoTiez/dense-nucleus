@@ -23,7 +23,27 @@ DEFAULT_DNA_SPEC_1DIM = {
     'before': [],  # Before the lesion, no CPDs in the beginning of the simulation
 }
 
-DEFAULT_CPD = [30, 35]
+DEFAULT_CPD_LENGTH = 15
+DEFAULT_CPD = [30, 30 + DEFAULT_CPD_LENGTH]
+
+CPD_STATES = {
+    'new': 0,
+    'recognised': 1,
+    'opened': 2,
+    'incised': 3,
+    'replaced': 4,
+    'removed': 5
+}
+
+
+class Lesion:
+    def __init__(self, start, end):
+        self.start = start
+        self.end = end
+        self.state = CPD_STATES['new']
+
+    def update_state_to(self, new_state):
+        self.state = CPD_STATES[new_state]
 
 
 class Rule:
@@ -149,14 +169,24 @@ class DNAGillespie(Gillespie):
             self.state = np.zeros(tuple(state_dim))
 
         self.dna_spec = dna_spec
+        self.rules = None
+        self.elong_speed = None
+        self.a = None
+        self.set_rules(rules, elong_speed)
+
+        self.t = 0
+        self.lesions = []
+
+        self.protein_to_idx = {prot: num for num, prot in enumerate(self.protein_names)}
+        self.reaction_prob()
+
+    def set_rules(self, rules, elong_speed):
         self.rules = rules
         self.elong_speed = elong_speed
         self.a = [np.zeros(len(r)) for r in self.rules]
 
-        self.t = 0
-
-        self.protein_to_idx = {prot: num for num, prot in enumerate(self.protein_names)}
-        self.reaction_prob()
+    def add_lesion(self, start, end):
+        self.lesions.append(Lesion(start, end))
 
     def determine_dna_idx(self, dna_string, proteins=None):
         area = []
@@ -319,6 +349,7 @@ class DNAGillespie(Gillespie):
 
         # Run until no more reactions in the longest reaction time possible
         max_tau = np.maximum(np.max(tau_count), tau_pool)
+
         for rs_idx in range(len(self.rules)):
             counter = 0
             while counter < max_iter:
@@ -329,18 +360,19 @@ class DNAGillespie(Gillespie):
                 tau_count[rs_idx] += tau
                 self._update(mu, rs_idx)
 
-        num_pol2_tss = np.sum(self.state[
-                self.dna_spec['tss'][0]:self.dna_spec['tss'][1]
-            ][:, self.protein_to_idx[Protein.POL2]]
-        )
-        elong_update = int(self.elong_speed * max_tau * num_pol2_tss)
+        no_cpd_mask = np.zeros(self.state.shape[0])
+        no_cpd_mask[self.dna_spec['transcript'][0]:self.dna_spec['transcript'][1]] = 1
+        if 'lesion' in self.dna_spec:
+            if self.dna_spec['lesion']:
+                no_cpd_mask[self.dna_spec['lesion'][0]:self.dna_spec['lesion'][1]] = 0
+                no_cpd_mask[self.dna_spec['before'][0]:self.dna_spec['before'][1]] = 0
+        no_cpd_mask = no_cpd_mask.astype('bool')
+
+        pol2_state = self.state[no_cpd_mask][:, self.protein_to_idx[Protein.POL2]]
+        elong_update = int(self.elong_speed * max_tau * pol2_state.sum())
         while elong_update > 0:
-            pol2_state = self.state[
-                            self.dna_spec['transcript'][0]:self.dna_spec['transcript'][1]
-                         ][:, self.protein_to_idx[Protein.POL2]]
-            rad26_state = self.state[
-                         self.dna_spec['transcript'][0]:self.dna_spec['transcript'][1]
-                         ][:, self.protein_to_idx[Protein.RAD26]]
+            pol2_state = self.state[no_cpd_mask][:, self.protein_to_idx[Protein.POL2]]
+            rad26_state = self.state[no_cpd_mask][:, self.protein_to_idx[Protein.RAD26]]
 
             if pol2_state.sum() == 0:
                 break
@@ -349,10 +381,15 @@ class DNAGillespie(Gillespie):
                 [self.protein_to_idx[Protein.POL2], self.protein_to_idx[Protein.RAD26]],
                 p=np.asarray([pol2_state.sum(), rad26_state.sum()]) / (pol2_state.sum() + rad26_state.sum())
             )
-            state = self.state[self.dna_spec['transcript'][0]:self.dna_spec['transcript'][1]][:, p_idx]
+            # p_idx = self.protein_to_idx[Protein.POL2]
+            # min_mask = self.state[:, p_idx] > 1.7
+            # no_cpd_mask = np.logical_and(no_cpd_mask, min_mask)
+            state = self.state[no_cpd_mask][:, p_idx]
+            if no_cpd_mask.sum() == 0:
+                break
             # upd_pos = np.argmax(state) + self.dna_spec['transcript'][0]
             upd_pos = np.random.choice(
-                np.arange(self.dna_spec['transcript'][0], self.dna_spec['transcript'][1]),
+                np.arange(self.state.shape[0])[no_cpd_mask],
                 p=(state**random_power)/(state**random_power).sum()  # To the power of 5 is engineered
                                                                      # and doesn't represent a biological feature
             )
@@ -360,12 +397,20 @@ class DNAGillespie(Gillespie):
             if upd_step == 0:
                 break
             self.state[upd_pos, p_idx] -= 1
+            # Stalling if it hits a lesion
+            if 'lesion' in self.dna_spec:
+                if self.dna_spec['lesion']:
+                    if upd_pos < self.dna_spec['lesion'][1] and upd_pos + upd_step >= self.dna_spec['lesion'][0]:
+                        cpd_pos = np.random.choice(np.arange(self.dna_spec['lesion'][0], self.dna_spec['lesion'][1]))
+                        self.state[cpd_pos, p_idx] += 1
+                        elong_update -= cpd_pos - upd_pos
+                        break
+
             if upd_pos + upd_step < self.dna_spec['transcript'][1]:
                 self.state[upd_pos + upd_step, p_idx] += 1
             elong_update -= np.minimum(upd_step, self.dna_spec['transcript'][1] - upd_pos)
 
         self.reaction_prob()
-
         self.t += max_tau
         return max_tau
 
@@ -416,17 +461,28 @@ def routine_gille_pool():
 
 
 def routine_gille_dna():
+    def plot():
+        plt.plot(smooth(gille_dna.state[:, gille_dna.protein_to_idx[Protein.RAD3]], 3), label='Rad3')
+        plt.plot(smooth(gille_dna.state[:, gille_dna.protein_to_idx[Protein.POL2]], 3), label='Pol2')
+        plt.plot(smooth(gille_dna.state[:, gille_dna.protein_to_idx[Protein.RAD26]], 3), label='Rad26')
+        plt.plot(smooth(gille_dna.state[:, gille_dna.protein_to_idx[Protein.RAD4]], 3), label='Rad4')
+        plt.xlabel('DNA Position')
+        plt.ylabel('#Molecules')
+        plt.title('Smoothed ChIP-seq Simulation')
+        plt.legend(loc='upper right')
+        plt.show()
     # Pivotal definitions
     # Time unit = minute
     # Considering genes with high transcription rate
     gille_proteins = Protein.get_types_gillespie()
     elong_speed = 120
-    num_prot = 1e5
-    chip_norm = 1e5
-    random_chip = 2.6
+    num_prot = 1e6
+    chip_norm = 1e6
+    random_chip = 2.6 * 2
     rad3_cp_chip = 6.8
-    pol2_trans_chip = 7.01
-    rad26_trans_chip = 3.5
+
+    pol2_trans_chip = 7.01 * 2
+    rad26_trans_chip = 3.5 * 2
 
     random_asso = random_chip / (chip_norm * LENGTH)
     random_disso = 1. / float(LENGTH)
@@ -440,7 +496,7 @@ def routine_gille_dna():
                 + DEFAULT_DNA_SPEC_1DIM['tss'][1] - DEFAULT_DNA_SPEC_1DIM['tss'][0]
         )
     )
-    pol2_disso = rad3_cp_chip * 1. / (DEFAULT_DNA_SPEC_1DIM['tss'][1] - DEFAULT_DNA_SPEC_1DIM['tss'][0])
+    pol2_disso = rad3_cp_chip / (DEFAULT_DNA_SPEC_1DIM['tss'][1] - DEFAULT_DNA_SPEC_1DIM['tss'][0])
     rad26_asso = rad26_trans_chip / float(
         num_prot
         * (
@@ -448,7 +504,7 @@ def routine_gille_dna():
                 + DEFAULT_DNA_SPEC_1DIM['tss'][1] - DEFAULT_DNA_SPEC_1DIM['tss'][0]
         )
     )
-    rad26_disso = rad3_cp_chip * 1. / (DEFAULT_DNA_SPEC_1DIM['tss'][1] - DEFAULT_DNA_SPEC_1DIM['tss'][0])
+    rad26_disso = rad3_cp_chip / (DEFAULT_DNA_SPEC_1DIM['tss'][1] - DEFAULT_DNA_SPEC_1DIM['tss'][0])
 
     rules_pool = []
     np.random.seed(0)
@@ -500,167 +556,200 @@ def routine_gille_dna():
     # #############################################
     # Damage response
     # #############################################
-    # Damage recognition TC-NER
-    # rules_elongation.extend([
-    #     Rule(
-    #         reactants=['dna_lesion', 'dna_%s_%s' % (DEFAULT_CPD[0] - 1, Protein.POL2)],
-    #         products=['dna_lesion_%s' % Protein.POL2],
-    #         c=.8
-    #     ),
-    #     Rule(
-    #         reactants=['dna_lesion', 'dna_%s_%s' % (DEFAULT_CPD[0] - 1, '_'.join(sorted([Protein.POL2, Protein.RAD26])))],
-    #         products=['dna_lesion_%s' % '_'.join(sorted([Protein.POL2, Protein.RAD26]))],
-    #         c=.8
-    #     ),
-    # ])
+    elong_speed_treated = 1  # Replace made up value
+    rad4_cpd_chip = 7.2  # TODO Replace made up value
+    rad4_cpd_asso = rad4_cpd_chip / (chip_norm * (DEFAULT_CPD[1] - DEFAULT_CPD[0]))
+    rad4_cpd_disso = 1. / (DEFAULT_CPD[1] - DEFAULT_CPD[0])
 
-    # damage_response = [
-    #     # No more association to the cp and only random Rad3 association
-    #     Rule(reactants=['dna_lesion', 'dna_cp_%s' % Protein.RAD3], products=[Protein.RAD3], c=0.5),
-    #
-    #     # Damage recognition GG-NER
-    #     Rule(
-    #         reactants=['dna_lesion', '!dna_lesion_%s' % Protein.POL2, Protein.RAD4],
-    #         products=['dna_lesion_%s' % Protein.RAD4],
-    #         c=1e-2
-    #     ),
-    #     Rule(
-    #         reactants=['dna_lesion_%s' % Protein.RAD4],
-    #         products=['dna_lesion', Protein.RAD4],
-    #         c=4e-3
-    #     ),
-    #
-    #     # Association / dissociation Rad26 TC-NER
-    #     Rule(
-    #         reactants=['dna_lesion_%s' % Protein.POL2, Protein.RAD26],
-    #         products=['dna_lesion_%s' % '_'.join(sorted([Protein.POL2, Protein.RAD26]))],
-    #         c=4e-3
-    #     ),
-    #     Rule(
-    #         reactants=['dna_lesion_%s' % '_'.join(sorted([Protein.POL2, Protein.RAD26]))],
-    #         products=['dna_lesion_%s' % Protein.POL2, Protein.RAD26],
-    #         c=4e-3
-    #     ),
-    #
-    #     # Recruitment Rad3 TC-NER
-    #     Rule(
-    #         reactants=['dna_lesion_%s' % '_'.join(sorted([Protein.POL2, Protein.RAD26])), Protein.RAD3],
-    #         products=[
-    #             'dna_lesion_%s' % '_'.join(sorted([Protein.RAD26, Protein.RAD3])),
-    #             'dna_before_%s' % Protein.POL2  # Backtracking
-    #         ],
-    #         c=1e-3
-    #     ),
-    #     Rule(
-    #         reactants=['dna_lesion_%s' % '_'.join(sorted([Protein.POL2, Protein.RAD26])), Protein.RAD3],
-    #         products=[
-    #             'dna_lesion_%s' % '_'.join(sorted([Protein.RAD26, Protein.RAD3])),
-    #             Protein.POL2  # Removal
-    #         ],
-    #         c=1e-3
-    #     ),
-    #
-    #     # Recruitment Rad3 GG-NER
-    #     Rule(
-    #         reactants=['dna_lesion_%s' % Protein.RAD4, Protein.RAD3],
-    #         products=['dna_lesion_%s' % '_'.join(sorted([Protein.RAD4, Protein.RAD3]))],
-    #         c=1e-3
-    #     ),
-    #
-    #     # Dissociation of Rad3 from lesion
-    #     Rule(
-    #         reactants=['dna_lesion_%s' % Protein.RAD3],
-    #         products=[Protein.RAD3],
-    #         c=2e-3
-    #     ),
-    #
-    # ]
-    # rules_dna.extend(damage_response)
+    rad26_cpd_chip = 0.52 * 2  # TODO Replace made up value
+    rad26_cpd_asso = rad26_cpd_chip / (chip_norm * (DEFAULT_CPD[1] - DEFAULT_CPD[0]))
+    # rad26_cpd_disso = 1. / (DEFAULT_CPD[1] - DEFAULT_CPD[0])
 
-    rad3 = []
-    pol2 = []
-    rad26 = []
+    rad3_cpd_chip = 0.41  # TODO Replace made up value
+    rad3_cpd_asso = rad3_cpd_chip / (chip_norm * (DEFAULT_CPD[1] - DEFAULT_CPD[0]))
+    # rad3_cpd_disso = 1. / (pol2_trans_c * (DEFAULT_CPD[1] - DEFAULT_CPD[0]))
+
+    damage_response = [
+        # Rad3 cp only random association
+        Rule(reactants=['dna_cp_%s' % Protein.RAD3], products=[Protein.RAD3], c=rad3_cp_disso),
+        Rule(reactants=[Protein.RAD3], products=['dna_cp_%s' % Protein.RAD3], c=rad3_cp_asso),
+
+        # Damage recognition GG-NER
+        Rule(
+            reactants=['dna_lesion', Protein.RAD4],
+            products=['dna_lesion_%s' % Protein.RAD4],
+            c=rad4_cpd_asso
+        ),
+        Rule(
+            reactants=['dna_lesion_%s' % Protein.RAD4],
+            products=['dna_lesion', Protein.RAD4],
+            c=rad4_cpd_disso
+        ),
+
+        # Association / dissociation Rad26 TC-NER
+        Rule(
+            reactants=['dna_lesion_%s' % Protein.POL2, Protein.RAD26],
+            products=['dna_lesion_%s' % Protein.POL2, 'dna_lesion_%s' % Protein.RAD26],
+            c=rad26_cpd_asso
+        ),
+
+        # Rule(
+        #     reactants=['dna_lesion_%s' % Protein.POL2, 'dna_lesion_%s' % Protein.RAD26],
+        #     products=['dna_lesion_%s' % Protein.POL2, Protein.RAD26],
+        #     c=rad26_cpd_disso
+        # ),
+
+        # Recruitment Rad3 TC-NER
+        Rule(
+            reactants=['dna_lesion_%s' % Protein.POL2, 'dna_lesion_%s' % Protein.RAD26, Protein.RAD3],
+            products=['dna_lesion_%s' % Protein.RAD26, 'dna_lesion_%s' % Protein.RAD3,
+                      'dna_before_%s' % Protein.POL2  # Backtracking
+                      ],
+            c=rad3_cpd_asso
+        ),
+        Rule(
+            reactants=['dna_lesion_%s' % Protein.POL2, 'dna_lesion_%s' % Protein.RAD26, Protein.RAD3],
+            products=['dna_lesion_%s' % Protein.RAD26, 'dna_lesion_%s' % Protein.RAD3, Protein.POL2],  # Removal
+            c=rad3_cpd_asso
+        ),
+        Rule(
+            reactants=['dna_lesion_%s' % Protein.POL2, 'dna_lesion_%s' % Protein.RAD26, Protein.RAD3],
+            products=['dna_lesion_%s' % Protein.RAD26, 'dna_lesion_%s' % Protein.RAD3],  # Degradation
+            c=rad3_cpd_asso
+        ),
+
+        # Recruitment Rad3 GG-NER
+        Rule(
+            reactants=['dna_lesion_%s' % Protein.RAD4, Protein.RAD3],
+            products=['dna_lesion_%s' % Protein.RAD4, 'dna_lesion_%s' % Protein.RAD3],
+            c=rad3_cpd_asso
+        ),
+
+        # # Dissociation of Rad3 from lesion
+        # Rule(
+        #     reactants=['dna_lesion_%s' % Protein.RAD3, 'dna_lesion_%s' % Protein.POL2],
+        #     products=[Protein.RAD3, 'dna_lesion_%s' % Protein.POL2],
+        #     c=rad3_cpd_disso
+        # )
+    ]
+
+    rad3_nouv = []
+    pol2_nouv = []
+    rad26_nouv = []
+
+    rad3_t0 = []
+    pol2_t0 = []
+    rad26_t0 = []
     for t in range(10):
         print('%s' % t)
         gille_pool = PoolGillespie(protein_conc=concentrations_pool, rules=rules_pool)
         gille_dna = DNAGillespie(
             gille_pool,
+            dna_spec=DEFAULT_DNA_SPEC_1DIM.copy(),
             protein_names=gille_proteins,
             rules=[rules_random, rules_dna],
             elong_speed=elong_speed
         )
         i = 0
+        radiation_t = -1
         while True:
             i += 1
-            # if i == 1000:
-            #     print('##################### UV RADIATION')
-            #     gille_dna.dna_spec['lesion'] = DEFAULT_CPD
-            #     gille_dna.dna_spec['before'] = [DEFAULT_DNA_SPEC_1DIM['transcript'][0], DEFAULT_CPD[0]]
-            #     gille_dna.reaction_prob()
             print(gille_dna.t)
             print('\n')
             gille_dna.simulate(max_iter=100, random_power=5)
             if i % 500 == 0:
-                print('Mean Pol2 Transcript: %s' % np.mean(gille_dna.state[15:90, gille_dna.protein_to_idx[Protein.POL2]]))
-                plt.plot(smooth(gille_dna.state[:, gille_dna.protein_to_idx[Protein.RAD3]], 3), label='Rad3')
-                plt.plot(smooth(gille_dna.state[:, gille_dna.protein_to_idx[Protein.POL2]], 3), label='Pol2')
-                plt.plot(smooth(gille_dna.state[:, gille_dna.protein_to_idx[Protein.RAD26]], 3), label='Rad26')
-                plt.plot(smooth(gille_dna.state[:, gille_dna.protein_to_idx[Protein.RAD4]], 3), label='Rad4')
-                plt.xlabel('DNA Position')
-                plt.ylabel('#Molecules')
-                plt.title('Smoothed ChIP-seq Simulation')
-                plt.legend(loc='upper right')
-                plt.show()
+                pass
+                # plot()
 
-        rad3.append(gille_dna.state[:, gille_dna.protein_to_idx[Protein.RAD3]])
-        pol2.append(gille_dna.state[:, gille_dna.protein_to_idx[Protein.POL2]])
-        rad26.append(gille_dna.state[:, gille_dna.protein_to_idx[Protein.RAD26]])
+            if i == 1000:
+                rad3_nouv.append(gille_dna.state[:, gille_dna.protein_to_idx[Protein.RAD3]].copy())
+                pol2_nouv.append(gille_dna.state[:, gille_dna.protein_to_idx[Protein.POL2]].copy())
+                rad26_nouv.append(gille_dna.state[:, gille_dna.protein_to_idx[Protein.RAD26]].copy())
+                radiation_t = gille_dna.t
+                print('##################### UV RADIATION')
+                # cpd_start = np.random.choice(
+                #     np.arange(DEFAULT_DNA_SPEC_1DIM['transcript'][0], DEFAULT_DNA_SPEC_1DIM['transcript'][1])
+                # )
+                cpd_start = DEFAULT_CPD[0]
+                gille_dna.dna_spec['lesion'] = [cpd_start, cpd_start + DEFAULT_CPD[1] - DEFAULT_CPD[0]]
+                gille_dna.dna_spec['before'] = [DEFAULT_DNA_SPEC_1DIM['transcript'][0], cpd_start]
+                gille_dna.set_rules([rules_random, damage_response], elong_speed_treated)
+                # gille_dna.add_lesion(cpd_start, cpd_start + DEFAULT_CPD_LENGTH)
+                gille_dna.reaction_prob()
 
-    fig, [ax_rad3, ax_pol2, ax_rad26] = plt.subplots(3, 1, figsize=(8, 8))
-    ax_rad3.plot(np.mean(rad3, axis=0), color='tab:orange')
-    ax_rad3.fill_between(
+            if radiation_t > 0 and gille_dna.t - radiation_t > 30:
+                # plot()
+                rad3_t0.append(gille_dna.state[:, gille_dna.protein_to_idx[Protein.RAD3]].copy())
+                pol2_t0.append(gille_dna.state[:, gille_dna.protein_to_idx[Protein.POL2]].copy())
+                rad26_t0.append(gille_dna.state[:, gille_dna.protein_to_idx[Protein.RAD26]].copy())
+                break
+
+    fig, ax = plt.subplots(3, 2, figsize=(12, 8))
+    ax[0][0].plot(np.mean(rad3_nouv, axis=0), color='tab:orange')
+    ax[0][0].fill_between(
         np.arange(100),
-        np.maximum(np.mean(rad3, axis=0) - np.var(rad3, axis=0), 0),
-        np.mean(rad3, axis=0) + np.var(rad3, axis=0),
+        np.maximum(np.mean(rad3_nouv, axis=0) - np.std(rad3_nouv, axis=0), 0),
+        np.mean(rad3_nouv, axis=0) + np.std(rad3_nouv, axis=0),
         color='tab:orange',
         alpha=.2
     )
-    ax_rad3.set_title('Rad3')
-    ax_rad3.set_ylabel('#Molecules')
+    ax[0][0].set_title('Rad3 NoUV')
+    ax[0][0].set_ylabel('#Molecules')
 
-    ax_pol2.plot(np.mean(pol2, axis=0), color='tab:green')
-    ax_pol2.fill_between(
+    ax[0][1].plot(np.mean(rad3_t0, axis=0), color='tab:orange')
+    ax[0][1].fill_between(
         np.arange(100),
-        np.maximum(np.mean(pol2, axis=0) - np.var(pol2, axis=0), 0),
-        np.mean(pol2, axis=0) + np.var(pol2, axis=0),
+        np.maximum(np.mean(rad3_t0, axis=0) - np.std(rad3_t0, axis=0), 0),
+        np.mean(rad3_t0, axis=0) + np.std(rad3_t0, axis=0),
+        color='tab:orange',
+        alpha=.2
+    )
+    ax[0][1].set_title('Rad3 T0')
+    ax[0][1].set_ylabel('#Molecules')
+
+    ax[1][0].plot(np.mean(pol2_nouv, axis=0), color='tab:green')
+    ax[1][0].fill_between(
+        np.arange(100),
+        np.maximum(np.mean(pol2_nouv, axis=0) - np.std(pol2_nouv, axis=0), 0),
+        np.mean(pol2_nouv, axis=0) + np.std(pol2_nouv, axis=0),
         color='tab:green',
         alpha=.2
     )
-    ax_pol2.set_title('Pol2')
-    ax_pol2.set_ylabel('#Molecules')
+    ax[1][0].set_title('Pol2 NoUV')
+    ax[1][0].set_ylabel('#Molecules')
 
-    ax_rad26.plot(np.mean(rad26, axis=0), color='tab:cyan')
-    ax_rad26.fill_between(
+    ax[1][1].plot(np.mean(pol2_t0, axis=0), color='tab:green')
+    ax[1][1].fill_between(
         np.arange(100),
-        np.maximum(np.mean(rad26, axis=0) - np.var(rad26, axis=0), 0),
-        np.mean(rad26, axis=0) + np.var(rad26, axis=0),
+        np.maximum(np.mean(pol2_t0, axis=0) - np.std(pol2_t0, axis=0), 0),
+        np.mean(pol2_t0, axis=0) + np.std(pol2_t0, axis=0),
+        color='tab:green',
+        alpha=.2
+    )
+    ax[1][1].set_title('Pol2 T0')
+    ax[1][1].set_ylabel('#Molecules')
+
+    ax[2][0].plot(np.mean(rad26_nouv, axis=0), color='tab:cyan')
+    ax[2][0].fill_between(
+        np.arange(100),
+        np.maximum(np.mean(rad26_nouv, axis=0) - np.std(rad26_nouv, axis=0), 0),
+        np.mean(rad26_nouv, axis=0) + np.std(rad26_nouv, axis=0),
         color='tab:cyan',
         alpha=.2
     )
-    ax_rad26.set_title('Rad26')
-    ax_rad26.set_ylabel('#Molecules')
+    ax[2][0].set_title('Rad26 NoUV')
+    ax[2][0].set_ylabel('#Molecules')
 
-    # ax_rad26pol2.plot(np.mean(rad26pol2, axis=0), color='tab:red')
-    # ax_rad26pol2.fill_between(
-    #     np.arange(100),
-    #     np.maximum(np.mean(rad26pol2, axis=0) - np.var(rad26pol2, axis=0), 0),
-    #     np.mean(rad26pol2, axis=0) + np.var(rad26pol2, axis=0),
-    #     color='tab:red',
-    #     alpha=.2
-    # )
-    # ax_rad26pol2.set_title('Pol2:Rad26')
-    # ax_rad26pol2.set_ylabel('#Molecules')
-    # ax_rad26pol2.set_xlabel('Position')
+    ax[2][1].plot(np.mean(rad26_t0, axis=0), color='tab:cyan')
+    ax[2][1].fill_between(
+        np.arange(100),
+        np.maximum(np.mean(rad26_t0, axis=0) - np.std(rad26_t0, axis=0), 0),
+        np.mean(rad26_t0, axis=0) + np.std(rad26_t0, axis=0),
+        color='tab:cyan',
+        alpha=.2
+    )
+    ax[2][1].set_title('Rad26 T0')
+    ax[2][1].set_ylabel('#Molecules')
 
     fig.suptitle('Simulated ChIP-seq')
     fig.tight_layout()
