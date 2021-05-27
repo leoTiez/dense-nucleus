@@ -365,24 +365,21 @@ class DNAGillespie(Gillespie):
         reactants = self.rules[rs_idx][mu].reactants
         products = self.rules[rs_idx][mu].products
         lesion_inter = []
-        h_before = self.h(reactants)
+        dna_interact_dict = {}
         for r in reactants:
             if 'dna' in r.lower() or 'lesion' in r.lower():
                 if r[0] == '!':
                     continue
                 proteins = self.get_reacting_protein(r)
                 dna_seg = self.get_reacting_dna(r)
+                dna_interact_dict[dna_seg] = {}
                 area = self.determine_dna_idx_react(dna_seg, proteins=proteins)
                 pos = np.random.choice(area)
                 if 'lesion' in r.lower():
                     lesion_inter = [cpd for cpd in self.lesions if cpd.start <= pos < cpd.end]
                 if proteins is not None:
                     for p in proteins:
-                        if self.state[pos, self.protein_to_idx[p]] == 0:
-                            proteins = self.get_reacting_protein(r)
-                            dna_seg = self.get_reacting_dna(r)
-                            self.determine_dna_idx_react(dna_seg, proteins=proteins)
-                            self.h(reactants)
+                        dna_interact_dict[dna_seg][p] = pos
                         self.state[pos, self.protein_to_idx[p]] -= 1
             else:
                 self.gille_pool.reduce(r)
@@ -394,12 +391,17 @@ class DNAGillespie(Gillespie):
                         dna_seg = self.get_reacting_dna(p)
                         area = self.determine_dna_idx_prod(dna_seg, proteins=proteins)
                     else:
+                        dna_seg = ''
                         area = []
                         for cpd in lesion_inter:
                             area.extend(list(np.arange(cpd.start - BACKTRACKING_LENGTH, cpd.start)))
                         area = np.asarray(area)
                     pos = np.random.choice(area)
                     for prot in proteins:
+                        if dna_seg in dna_interact_dict:
+                            if prot in dna_interact_dict[dna_seg]:
+                                self.state[dna_interact_dict[dna_seg][prot], self.protein_to_idx[prot]] += 1
+                                continue
                         self.state[pos, self.protein_to_idx[prot]] += 1
 
             elif 'lesion' in p.lower():
@@ -422,6 +424,7 @@ class DNAGillespie(Gillespie):
     def simulate(self, max_iter=10, random_power=5):
         tau_pool = self.gille_pool.simulate()
         tau_count = np.zeros(len(self.rules))
+        pol2_sum = self.state[10:30, self.protein_to_idx['pol2']].sum() + self.state[10:30, self.protein_to_idx[ACTIVE_POL2]].sum()
         for rs_idx in range(len(self.rules)):
             tau, mu = self._sample_reaction(rs_idx=rs_idx)
             if mu == -1:
@@ -457,26 +460,38 @@ class DNAGillespie(Gillespie):
                 self.state[transcript_mask] = np.pad(self.state[transcript_mask], (1, 0), mode='constant')[:-1]
             else:
                 start = self.dna_spec['tss'][0]
+                # cpds = [cpd for cpd in self.lesions if cpd.state != CPD_STATES['new']]
+                # cpds = sorted(cpds, key=lambda x: x.end, reverse=True)
+                # end = self.dna_spec['transcript'][1]
+                # cpd_move_mask = np.zeros(self.state.shape)
+                # cpd_move_mask[cpds[0].end:end, p_idx] = 1
+                # cpd_move_mask = cpd_move_mask.astype('bool')
+                # self.state[cpd_move_mask] = np.pad(self.state[cpd_move_mask], (1, 0), mode='constant')[:-1]
+
                 for cpd in self.lesions:
                     end = cpd.start
                     if cpd.state == CPD_STATES['new']:
-                        if self.state[end - 1, p_idx] > 0:
-                            pol2_upd = np.random.choice(np.arange(cpd.start, cpd.end))
-                            self.state[pol2_upd, p_idx] += 1
+                        if self.state[end - 1:cpd.end, p_idx].sum() > 0:
                             cpd.update_state_to('recognised')
-                            self.h(['lesion_recognised_pol2', '!lesion_recognised_rad26', 'rad26'])
-                            self.h(['lesion_recognised_pol2', 'lesion_recognised_rad26', '!lesion_recognised_rad3', 'rad3'])
+                        else:
+                            continue
+
                     last_idx = np.arange(start, end)[::-1][np.argmin(self.state[start:end][:, p_idx][::-1])]
                     cpd_move_mask = np.zeros(self.state.shape)
                     cpd_move_mask[start:last_idx + 1, p_idx] = 1
                     cpd_move_mask = cpd_move_mask.astype('bool')
+                    before_sum = self.state[10:30, self.protein_to_idx['pol2']].sum() + self.state[10:30, self.protein_to_idx[ACTIVE_POL2]].sum()
                     self.state[cpd_move_mask] = np.pad(self.state[cpd_move_mask], (1, 0), mode='constant')[:-1]
                     start = cpd.end
                 end = self.dna_spec['transcript'][1]
                 cpd_move_mask = np.zeros(self.state.shape)
                 cpd_move_mask[start:end, p_idx] = 1
                 cpd_move_mask = cpd_move_mask.astype('bool')
+                before_sum = self.state[10:30, self.protein_to_idx['pol2']].sum() + self.state[10:30,
+                                                                                    self.protein_to_idx[
+                                                                                        ACTIVE_POL2]].sum()
                 self.state[cpd_move_mask] = np.pad(self.state[cpd_move_mask], (1, 0), mode='constant')[:-1]
+                x = 5
 
             # for cpd in self.lesions:
             #     pol2_cpd = self.state[cpd.start:cpd.end, p_idx]
@@ -538,13 +553,13 @@ def routine_gille_pool():
 
 def routine_gille_dna():
     def plot():
-        plt.plot(smooth(gille_dna.state[:, gille_dna.protein_to_idx[Protein.RAD3]], 3), label='Rad3')
+        plt.plot(smooth(gille_dna.state[:, gille_dna.protein_to_idx[Protein.RAD3]], 3), label='Rad3', color='tab:orange')
         plt.plot(smooth(
             gille_dna.state[:, gille_dna.protein_to_idx[Protein.POL2]]
             + gille_dna.state[:, gille_dna.protein_to_idx[ACTIVE_POL2]],
-            3), label='Pol2')
-        plt.plot(smooth(gille_dna.state[:, gille_dna.protein_to_idx[Protein.RAD26]], 3), label='Rad26')
-        plt.plot(smooth(gille_dna.state[:, gille_dna.protein_to_idx[Protein.RAD4]], 3), label='Rad4')
+            3), label='Pol2', color='tab:green')
+        plt.plot(smooth(gille_dna.state[:, gille_dna.protein_to_idx[Protein.RAD26]], 3), label='Rad26', color='tab:cyan')
+        plt.plot(smooth(gille_dna.state[:, gille_dna.protein_to_idx[Protein.RAD4]], 3), label='Rad4', color='tab:red')
         plt.xlabel('DNA Position')
         plt.ylabel('#Molecules')
         plt.title('Smoothed ChIP-seq Simulation')
@@ -555,7 +570,7 @@ def routine_gille_dna():
     # Time unit = minute
     # Considering genes with high transcription rate
     gille_proteins = Protein.get_types_gillespie()
-    elong_speed = 240
+    elong_speed = 1200
     num_prot = 1e5
     chip_norm = 1e5
     random_chip = 2.6
@@ -593,6 +608,7 @@ def routine_gille_dna():
     # #############################################
     # Rules define association/dissociation behaviour between proteins and DNA
     # #############################################
+
     rules_random = [
         Rule(reactants=['!dna_%s' % gp, gp], products=['dna_%s' % gp], c=random_asso)
         for gp in gille_proteins if gp != Protein.POL2
@@ -649,7 +665,7 @@ def routine_gille_dna():
     # #############################################
     # Damage response
     # #############################################
-    elong_speed_treated = 240
+    elong_speed_treated = 400
     rad4_cpd_chip = 4.2 * 2  # TODO Replace made up value
     rad4_cpd_asso = rad4_cpd_chip / (chip_norm * (DEFAULT_CPD[1] - DEFAULT_CPD[0]))
     # rad4_cpd_disso = 1. / (DEFAULT_CPD[1] - DEFAULT_CPD[0])
@@ -658,27 +674,19 @@ def routine_gille_dna():
     rad26_cpd_asso = rad26_cpd_chip / (chip_norm * (DEFAULT_CPD[1] - DEFAULT_CPD[0]))
     # rad26_cpd_disso = 1. / (DEFAULT_CPD[1] - DEFAULT_CPD[0])
 
-    rad3_cpd_chip = 81.0 * 2  # TODO Replace made up value
+    rad3_cpd_chip = 8.1  # TODO Replace made up value
     rad3_cpd_asso = rad3_cpd_chip / (chip_norm * (DEFAULT_CPD[1] - DEFAULT_CPD[0]))
-    pol2_backtracking = rad3_cpd_asso * 1.5
+    pol2_backtracking = rad3_cpd_asso * 10000.
     pol2_degradation = rad3_cpd_asso * .1
 
     rules_cpd_random = [
-        Rule(reactants=['!dna_%s' % gp, gp], products=['dna_%s' % gp], c=random_asso * .1)
+        Rule(reactants=['!dna_%s' % gp, gp], products=['dna_%s' % gp], c=random_asso * .5)
         for gp in gille_proteins if gp != Protein.POL2
     ]
 
-    rules_cpd_random.append(
-        Rule(
-            reactants=['!dna_%s_%s' % (ACTIVE_POL2, Protein.POL2), Protein.POL2],
-            products=['dna_%s' % Protein.POL2],
-            c=random_asso * .01
-        )
-    )
-
     rules_cpd_random.extend([
-        Rule(reactants=['dna_%s' % gp], products=[gp], c=random_disso * .1)
-        for gp in gille_proteins
+        Rule(reactants=['dna_%s' % gp], products=[gp], c=random_disso * .5)
+        for gp in gille_proteins if gp != Protein.POL2
     ])
 
     damage_response = [
@@ -690,16 +698,16 @@ def routine_gille_dna():
         # ),
 
         # Recruitment Rad3 TC-NER
-        Rule(
-            reactants=[
-                'lesion_recognised_%s' % ACTIVE_POL2,
-                'lesion_recognised_%s' % Protein.RAD26,
-                '!lesion_recognised_%s' % Protein.RAD3,
-                Protein.RAD3
-            ],
-            products=['lesion_opened_%s' % Protein.RAD26, 'lesion_opened_%s' % Protein.RAD3, Protein.POL2],  # Removal
-            c=rad3_cpd_asso
-        ),
+        # Rule(
+        #     reactants=[
+        #         'lesion_recognised_%s' % ACTIVE_POL2,
+        #         'lesion_recognised_%s' % Protein.RAD26,
+        #         '!lesion_recognised_%s' % Protein.RAD3,
+        #         Protein.RAD3
+        #     ],
+        #     products=['lesion_opened_%s' % Protein.RAD26, 'lesion_opened_%s' % Protein.RAD3, Protein.POL2],  # Removal
+        #     c=rad3_cpd_asso
+        # ),
         Rule(
             reactants=[
                 'lesion_recognised_%s' % ACTIVE_POL2,
@@ -712,15 +720,35 @@ def routine_gille_dna():
                       ],
             c=pol2_backtracking
         ),
+        # Rule(
+        #     reactants=[
+        #         'lesion_recognised_%s' % ACTIVE_POL2,
+        #         'lesion_recognised_%s' % Protein.RAD26,
+        #         '!lesion_recognised_%s' % Protein.RAD3,
+        #         Protein.RAD3
+        #     ],
+        #     products=['lesion_opened_%s' % Protein.RAD26, 'lesion_opened_%s' % Protein.RAD3],  # Degradation
+        #     c=pol2_degradation
+        # ),
+
+        Rule(
+            reactants=['!lesion_opened_%s' % Protein.RAD3, Protein.RAD3],
+            products=['lesion_opened_%s' % Protein.RAD3],
+            c=rad3_cpd_asso
+        ),
+
         Rule(
             reactants=[
-                'lesion_recognised_%s' % ACTIVE_POL2,
-                'lesion_recognised_%s' % Protein.RAD26,
-                '!lesion_recognised_%s' % Protein.RAD3,
-                Protein.RAD3
+                'lesion_opened_%s' % ACTIVE_POL2,
+                'lesion_opened_%s' % Protein.RAD26,
+                'lesion_opened_%s' % Protein.RAD3
             ],
-            products=['lesion_opened_%s' % Protein.RAD26, 'lesion_opened_%s' % Protein.RAD3],  # Degradation
-            c=pol2_degradation
+            products=[
+                'lesion_opened_%s' % Protein.RAD26,
+                'lesion_opened_%s' % Protein.RAD3,
+                'dna_before_%s' % Protein.POL2  # Backtracking, doesn't move anymore
+            ],
+            c=pol2_backtracking
         ),
         # # Rad3 recruitment is still possible when lesion hasn't begun w/ incision
         # Rule(
@@ -769,8 +797,22 @@ def routine_gille_dna():
             reactants=['dna_transcript_%s_%s' % (ACTIVE_POL2, Protein.RAD26)],
             products=['dna_transcript_%s' % ACTIVE_POL2, Protein.RAD26],
             c=rad26_disso
-        )
+        ),
 
+        Rule(
+            reactants=[
+                'dna_transcript_%s' % Protein.POL2,
+                '!dna_transcript_%s_%s' % (Protein.POL2, Protein.RAD26),
+                Protein.RAD26
+            ],
+            products=['dna_transcript_%s_%s' % (Protein.POL2, Protein.RAD26)],
+            c=rad26_asso
+        ),
+        Rule(
+            reactants=['dna_transcript_%s_%s' % (Protein.POL2, Protein.RAD26)],
+            products=['dna_transcript_%s' % Protein.POL2, Protein.RAD26],
+            c=rad26_disso
+        )
         # # Pol2 removal
         # Rule(
         #     reactants=[
@@ -863,10 +905,10 @@ def routine_gille_dna():
 
                 radiation_t = gille_dna.t
                 print('##################### UV RADIATION')
-                cpd_start = np.random.choice(
-                    np.arange(DEFAULT_DNA_SPEC_1DIM['transcript'][0], DEFAULT_DNA_SPEC_1DIM['transcript'][1])
-                )
-                # cpd_start = DEFAULT_CPD[0]
+                # cpd_start = np.random.choice(
+                #     np.arange(DEFAULT_DNA_SPEC_1DIM['transcript'][0], DEFAULT_DNA_SPEC_1DIM['transcript'][1])
+                # )
+                cpd_start = DEFAULT_CPD[0]
                 rules = [[]]
                 rules[0].extend(rules_cpd_random)
                 rules[0].extend(damage_response)
