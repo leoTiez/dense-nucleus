@@ -182,19 +182,32 @@ class DNAGillespie(Gillespie):
             rules=[],
             elong_speed=1200
     ):
+        """
+        Class to simulate the Gillespie algorithm with a notion of space. The DNA molecule is represented as a
+        one-dim array. The DNA molecule interacts w/ a well-mixed solution which represents the core.
+        :param gille_pool: Gillespie pool object representing the nucleus surrounding the DNA
+        :type gille_pool: PoolGillespie
+        :param size: Length of the DNA molecule
+        :type size: int
+        :param protein_names: List with protein names
+        :type protein_names: list(str)
+        :param dna_spec: DNA specification define the areas where interaction profiles can change. Areas are passed
+        as a dictionary where the key represents the name of the DNA area and the value is a tuple or a list of length
+        2 defining the start and the end positions.
+        :type dna_spec: dict(str, list(int))
+        :param rules: A list with lists of rules. Due to the fact that the lists are nested, it's possible to run
+        several rule sets independently in the simulation. This can be used if reactions are frequent.
+        :type rules: list(list(Rule))
+        :param elong_speed: Elongation speed of Pol2 Usually assumed to be base pairs per minute but that is dependent
+        on the usage
+        :type elong_speed: int
+        """
         self.gille_pool = gille_pool
         self.size = size
         self.protein_names = protein_names
         num_species = len(self.protein_names)
 
-        # One-dim case
-        if isinstance(size, int):
-            self.state = np.zeros((size, num_species))
-        # Two-dim case. This is in experimental state and hasn't been properly tested yet
-        elif isinstance(size, Iterable):
-            state_dim = list(size)
-            state_dim.append(num_species)
-            self.state = np.zeros(tuple(state_dim))
+        self.state = np.zeros((size, num_species))
 
         self.dna_spec = dna_spec
         self.rules = None
@@ -209,14 +222,49 @@ class DNAGillespie(Gillespie):
         self.reaction_prob()
 
     def set_rules(self, rules, elong_speed):
+        """
+        Setter function for new rules, e.g. when the cell is radiated and the interaction profiles change.
+        Interaction probabilities (or number of expected interactions per time unit) are updated with the new rules.
+        :param rules: Nested list with rules (see docstring of the constructor)
+        :type rules: list(list(Rule))
+        :param elong_speed: New elongation speed of Pol2
+        :type elong_speed: int
+        :return: None
+        """
         self.rules = rules
         self.elong_speed = elong_speed
         self.a = [np.zeros(len(r)) for r in self.rules]
 
     def add_lesion(self, start, end):
+        """
+        Add a lesion to the dna. A lesion is represented as an object which can go through different enzymatic states
+        (see constructor of Lesion)
+        :param start: Start position
+        :type start: int
+        :param end: End position
+        :type end: int
+        :return: None
+        """
         self.lesions.append(Lesion(start, end))
 
     def _determine_dna_idx(self, dna_react='', dna_prod='', proteins=None):
+        """
+        Determine the indices/base pairs in the DNA molecule where proteins can interact based on the rules.
+        Rules can be determined with conditions of presence or absence (see constructor if Rule) of other proteins
+        or the state of a lesion. DNA with which proteins interact is passed as either dna_react (reaction condition)
+        or dna_prod (reaction product) but never both.
+        All entities must be connected with an underscore. If it is dependent on absence of a protein,
+        an exclamation mark is added to the beginning. Example:
+        dna_react = dna_cp
+        proteins = ['rad3', '!pol2']
+        :param dna_react: DNA segment on which the reaction is conditioned
+        :type dna_react: str
+        :param dna_prod: DNA segment with which the chemicals effectively bind
+        :type dna_prod: str
+        :param proteins: List with proteins
+        :type proteins: list(str)
+        :return: Positions on the DNA or which the conditions defined in the rules are met
+        """
         area = []
         p_idc = np.asarray([self.protein_to_idx[p.strip('!')] for p in proteins]) if proteins is not None else None
 
@@ -322,19 +370,46 @@ class DNAGillespie(Gillespie):
         return list(np.unique(area))
 
     def determine_dna_idx_react(self, dna_string, proteins=None):
+        """
+        Determine the DNA indices/base pairs which are part of the reactants
+        :param dna_string: string which defines the dna segment (e.g. dna or dna_transcript)
+        :type dna_string: str
+        :param proteins: List of proteins which interact with the DNA or on which the reaction is conditioned
+        :type proteins: list(str)
+        :return: Indices on the DNA for which the conditions are met
+        """
         return self._determine_dna_idx(dna_react=dna_string, dna_prod='', proteins=proteins)
 
     def determine_dna_idx_prod(self, dna_string, proteins):
+        """
+        Determine the DNA indices/base pairs which are part of the products
+        :param dna_string: string which defines the dna segment (e.g. dna or dna_transcript)
+        :type dna_string: str
+        :param proteins: List of proteins which interact with the DNA or on which the reaction is conditioned
+        :type proteins: list(str)
+        :return: Indices on the DNA for which the conditions are met
+        """
         return self._determine_dna_idx(dna_react='', dna_prod=dna_string, proteins=proteins)
 
     def get_reacting_protein(self, reactant_org):
-        # reactant = reactant_org.strip('!')
+        """
+        Get the proteins for which the rule is defined
+        :param reactant_org: Rule string which defines the interacting proteins and DNA segments
+        :type reactant_org: str
+        :return: List with proteins
+        """
         reactant = reactant_org
         split = reactant.split('_')
         proteins = [protein for protein in split if protein.strip('!') in self.protein_names]
         return proteins if proteins else None
 
     def get_reacting_dna(self, reactant_org):
+        """
+        Get the DNA segment with which the proteins interact.
+        :param reactant_org: Rule string which defines the interacting proteins and DNA segments
+        :type reactant_org: str
+        :return: String defining the DNA segment
+        """
         reactant = reactant_org.strip('!')
         free_prefix = '!' if '!' == reactant_org[0] else ''
         if 'dna' not in reactant and 'lesion' not in reactant:
@@ -363,6 +438,12 @@ class DNAGillespie(Gillespie):
                 return '%sdna_%s' % (free_prefix, key)
 
     def get_reacting_lesion(self, reactants):
+        """
+        Get the lesion type from the reactants
+        :param reactants: Rule string which defines the interacting proteins and DNA segments
+        :type reactants: str
+        :return: Type of lesion as a string
+        """
         split = reactants.split('_')
         try:
             if split[1] in self.protein_names:
@@ -372,7 +453,13 @@ class DNAGillespie(Gillespie):
         except IndexError:
             return ''
 
-    def h(self, reactants, is_elong=False):
+    def h(self, reactants):
+        """
+        Determine the number of all possible combinations how proteins/DNA can interact w/ each other
+        :param reactants: List with reactants
+        :type reactants: list(str)
+        :return: Number of all possible interaction combinations
+        """
         dna_strings = [r for r in reactants if 'dna' in r.lower() or 'lesion' in r.lower()]
         reactant_strings = [r for r in reactants
                             if 'dna' not in r.lower() and 'lesion' not in r.lower() and '!' not in r.lower()]
@@ -393,12 +480,22 @@ class DNAGillespie(Gillespie):
         return self.gille_pool.h(reactant_strings) * dna_react
 
     def reaction_prob(self):
+        """
+        Calculate and update the reaction probabilities (or the number of expected reactions per time unit)
+        :return: None
+        """
         for r in range(len(self.rules)):
             for i in range(len(self.rules[r])):
                 reactants = self.rules[r][i].reactants
-                self.a[r][i] = self.h(reactants, is_elong=False) * self.rules[r][i].c
+                self.a[r][i] = self.h(reactants) * self.rules[r][i].c
 
     def _sample_reaction(self, rs_idx=0):
+        """
+        Sample a reaction and reaction time
+        :param rs_idx: Rule set index
+        :type rs_idx: int
+        :return: Time step and the index of the reaction in the given rule set
+        """
         a = self.a[rs_idx]
         a0 = np.sum(a)
         if a0 == 0:
@@ -409,6 +506,15 @@ class DNAGillespie(Gillespie):
         return tau, mu
 
     def _update(self, mu, rs_idx):
+        """
+        Update the state of the system given a reaction according to which the interactions change. This function
+        also updates the reaction probabilities.
+        :param mu: Index of the reaction
+        :type mu: int
+        :param rs_idx: Index of the rule set
+        :type rs_idx: int
+        :return: None
+        """
         reactants = self.rules[rs_idx][mu].reactants
         products = self.rules[rs_idx][mu].products
         lesion_inter = []
@@ -467,12 +573,6 @@ class DNAGillespie(Gillespie):
                     pos = np.random.choice(area)
                     for prot in proteins:
                         if dna_seg in dna_interact_dict:
-                            # if prot in dna_interact_dict[dna_seg]:
-                            #     self.state[
-                            #         dna_interact_dict[dna_seg][prot],
-                            #         self.protein_to_idx[prot]
-                            #     ] += 1
-                            #     continue
                             update_mask = [prot_temp in dna_interact_dict[dna_seg] for prot_temp in proteins]
                             if any(update_mask):
                                 update_idx = np.where(update_mask)[0]
@@ -516,8 +616,26 @@ class DNAGillespie(Gillespie):
 
         self.reaction_prob()
 
-    def simulate(self, max_iter=10, random_power=5):
+    def simulate(self, max_iter=10):
+        """
+        Simulate a reaction in the system. As there are several rule sets possible, the sample times can be different.
+        Therefore, if a rule of one rule set takes much less time than the reaction of another rule set, more reactions
+        are sampled until no more reaction can occur within the time frame the longer reaction took. This function
+        also elongates active Pol2 along the genome.
+        :param max_iter: Maximum number of reactions which can be sampled from a rule set which was quicker than a
+        rule from another rule set.
+        :type max_iter: int
+        :return: The reaction time
+        """
         def update_pol2(s=None, e=None):
+            """
+            Update the Pol2 state dependent on active and inactive Pol2 that is associated to the DNA
+            :param s: Start index
+            :type s: int
+            :param e: End index
+            :type e: int
+            :return: None
+            """
             s = s if s is not None else self.dna_spec['tss'][0]
             e = e if e is not None else self.dna_spec['transcript'][1]
             inactive_pol2 = self.protein_to_idx[Protein.POL2]
@@ -597,14 +715,27 @@ class DNAGillespie(Gillespie):
         self.t += max_tau
         return max_tau
 
-    def plot(self, proteins, colors, smoothing=3, save_plots=False, save_prefix=''):
+    def plot(self, proteins, colors, smoothing=3, save_plot=False, save_prefix=''):
+        """
+        Plot the state occupancy level on the DNA
+        :param proteins: Proteins that are plotted
+        :type proteins: list(str)
+        :param colors: Colors that are used
+        :type colors: list(str)
+        :param smoothing: The number of values that are used for smoothing the graph
+        :type smoothing: int
+        :param save_plot: If True, the plot is saved instead of displayed
+        :type save_plot: bool
+        :param save_prefix: Identifier that is added to the beginning of the saved plot name
+        :type save_prefix: str
+        :return: None
+        """
         for p, c in zip(proteins, colors):
             if p != Protein.POL2 and p != Protein.ACTIVE_POL2:
-                plt.plot(smooth(self.state[:, self.protein_to_idx[p]], smoothing), label=p, color=c)
+                plt.plot(smooth(self.get_protein_state(p), smoothing), label=p, color=c)
             else:
                 plt.plot(smooth(
-                    self.state[:, self.protein_to_idx[Protein.POL2]]
-                    + self.state[:, self.protein_to_idx[Protein.ACTIVE_POL2]],
+                    self.get_protein_state(Protein.POL2) + self.get_protein_state(Protein.ACTIVE_POL2),
                     smoothing
                 ), label='Pol2', color=c)
 
@@ -612,13 +743,23 @@ class DNAGillespie(Gillespie):
         plt.ylabel('#Molecules')
         plt.title('Smoothed ChIP-seq Simulation')
         plt.legend(loc='upper right')
-        if not save_plots:
+        if not save_plot:
             plt.show()
         else:
             path = validate_dir('figures')
             plt.savefig('%s/%s_singe_cell_state.png' % (path, save_prefix))
 
     def get_protein_state(self, protein, start=None, end=None):
+        """
+        Get the occupancy levels of a particular protein
+        :param protein: Protein name
+        :type protein: str
+        :param start: Start position
+        :type start: int
+        :param end: End position
+        :type end: int
+        :return: Occupancy levels of the given protein
+        """
         start = start if start is not None else 0
         end = end if end is not None else self.state.shape[0]
         return self.state[start:end, self.protein_to_idx[protein]].copy()
