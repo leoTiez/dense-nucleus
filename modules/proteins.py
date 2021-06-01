@@ -17,6 +17,8 @@ class Protein(AbstractProtein, ABC):
     DNA_POL = 'poly'
     DNA_LIG = 'cdc9'
 
+    ACTIVE_POL2 = 'active pol2'
+
     IC_RAD3 = 'ic rad3'
     IC_POL2 = 'ic pol2'
     IC_RAD26 = 'ic rad26'
