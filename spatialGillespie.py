@@ -192,7 +192,7 @@ class DNAGillespie(Gillespie):
 
     def _determine_dna_idx(self, dna_react='', dna_prod='', proteins=None):
         area = []
-        p_idc = np.asarray([self.protein_to_idx[p] for p in proteins]) if proteins is not None else None
+        p_idc = np.asarray([self.protein_to_idx[p.strip('!')] for p in proteins]) if proteins is not None else None
 
         if dna_react == '':
             if dna_prod == '':
@@ -209,7 +209,12 @@ class DNAGillespie(Gillespie):
             # If reactant dna string is equal to 'dna', protein associates from pool and therefore needs to find
             # free position
             if not must_free:
-                interact_mask = np.all(self.state[:, p_idc] > 0, axis=1)
+                interact_mask = np.ones(self.state.shape[0]).astype('bool')
+                for p_i, prot in zip(p_idc, proteins):
+                    if prot[0] == '!':
+                        interact_mask = np.logical_and(interact_mask, self.state[:, p_i] < 1)
+                    else:
+                        interact_mask = np.logical_and(interact_mask, self.state[:, p_i] > 0)
             else:
                 interact_mask = np.all(self.state[:, p_idc] < 1, axis=1)
             return np.arange(self.size)[interact_mask] if p_idc is not None else np.arange(self.size)
@@ -234,7 +239,12 @@ class DNAGillespie(Gillespie):
             pos = int(pos)
             if p_idc is not None:
                 if not must_free:
-                    interact_mask = np.all(self.state[pos, p_idc] > 0)
+                    interact_mask = np.ones(self.state.shape[0]).astype('bool')
+                    for p_i, prot in zip(p_idc, proteins):
+                        if prot[0] == '!':
+                            interact_mask = np.logical_and(interact_mask, self.state[pos, p_i] < 1)
+                        else:
+                            interact_mask = np.logical_and(interact_mask, self.state[pos, p_i] > 0)
                 else:
                     interact_mask = np.all(self.state[pos, p_idc] < 1)
                 area = [pos] if interact_mask else []
@@ -262,15 +272,25 @@ class DNAGillespie(Gillespie):
                         break
 
             for s, e in zip(border_start, border_end):
+                interact_mask = np.zeros(self.state.shape[0]).astype('bool')
+                interact_mask[s:e] = True
                 if proteins is not None:
                     if not must_free:
-                        interact_mask = np.all(self.state[s:e][:, p_idc] > 0, axis=1)
+                        for p_i, prot in zip(p_idc, proteins):
+                            if prot[0] == '!':
+                                interact_mask = np.logical_and(
+                                    interact_mask,
+                                    self.state[:, p_i] < 1
+                                )
+                            else:
+                                interact_mask = np.logical_and(
+                                    interact_mask,
+                                    self.state[:, p_i] > 0
+                                )
                     else:
-                        interact_mask = np.all(self.state[s:e][:, p_idc] < 1, axis=1)
-                else:
-                    interact_mask = np.ones(e - s).astype('bool')
+                        interact_mask = np.logical_and(interact_mask, np.all(self.state[:, p_idc] < 1, axis=1))
 
-                area_range = np.arange(s, e)[interact_mask]
+                area_range = np.arange(self.state.shape[0])[interact_mask]
                 area.extend(area_range)
 
         return list(np.unique(area))
@@ -282,9 +302,10 @@ class DNAGillespie(Gillespie):
         return self._determine_dna_idx(dna_react='', dna_prod=dna_string, proteins=proteins)
 
     def get_reacting_protein(self, reactant_org):
-        reactant = reactant_org.strip('!')
+        # reactant = reactant_org.strip('!')
+        reactant = reactant_org
         split = reactant.split('_')
-        proteins = [protein for protein in split if protein in self.protein_names]
+        proteins = [protein for protein in split if protein.strip('!') in self.protein_names]
         return proteins if proteins else None
 
     def get_reacting_dna(self, reactant_org):
@@ -337,7 +358,7 @@ class DNAGillespie(Gillespie):
             if dna_area is None:
                 continue
             if proteins is not None and len(dna_area) > 0 and '!' != dna_string[0]:
-                p_idc = [self.protein_to_idx[p] for p in proteins]
+                p_idc = [self.protein_to_idx[p.strip('!')] for p in proteins]
                 dna_react *= np.sum(self.state[np.asarray(dna_area)][:, np.asarray(p_idc)])
             else:
                 dna_react *= len(dna_area)
@@ -381,8 +402,9 @@ class DNAGillespie(Gillespie):
 
                 if proteins is not None:
                     for p in proteins:
-                        dna_interact_dict[dna_seg][p] = pos
-                        self.state[pos, self.protein_to_idx[p]] -= 1
+                        if '!' != p[0]:
+                            dna_interact_dict[dna_seg][p.strip('!')] = pos
+                            self.state[pos, self.protein_to_idx[p.strip('!')]] -= 1
             else:
                 self.gille_pool.reduce(r)
 
@@ -399,15 +421,41 @@ class DNAGillespie(Gillespie):
                         dna_seg = ''
                         area = []
                         for cpd in lesion_inter:
-                            area.extend(list(np.arange(cpd.start - BACKTRACKING_LENGTH, cpd.start)))
-                        area = np.asarray(area)
+                            area_backtrack = []
+                            for prot in proteins:
+                                if prot == Protein.POL2:
+                                    a = np.where(
+                                        np.logical_and(
+                                            self.state[:, self.protein_to_idx[ACTIVE_POL2]] < 1,
+                                            self.state[:, self.protein_to_idx[Protein.POL2]] < 1,
+                                        )
+                                    )[0]
+                                else:
+                                    a = np.where(self.state[:, self.protein_to_idx[prot]] < 1)[0]
+                                a = a[np.logical_and(cpd.start - BACKTRACKING_LENGTH <= a, a < cpd.start)]
+                                area_backtrack.extend(a.tolist())
+                            area.extend(np.unique(area_backtrack).tolist())
+                        # Degradation. Can only happen when backtracking is not possible
+                        if not area:
+                            continue
                     pos = np.random.choice(area)
                     for prot in proteins:
                         if dna_seg in dna_interact_dict:
-                            if prot in dna_interact_dict[dna_seg]:
-                                self.state[dna_interact_dict[dna_seg][prot], self.protein_to_idx[prot]] += 1
+                            # if prot in dna_interact_dict[dna_seg]:
+                            #     self.state[
+                            #         dna_interact_dict[dna_seg][prot],
+                            #         self.protein_to_idx[prot]
+                            #     ] += 1
+                            #     continue
+                            update_mask = [prot_temp in dna_interact_dict[dna_seg] for prot_temp in proteins]
+                            if any(update_mask):
+                                update_idx = np.where(update_mask)[0]
+                                self.state[
+                                    dna_interact_dict[dna_seg][proteins[update_idx[0]]],
+                                    self.protein_to_idx[prot]
+                                ] += 1
                                 continue
-                        self.state[pos, self.protein_to_idx[prot]] += 1
+                        self.state[pos, self.protein_to_idx[prot.strip('!')]] += 1
 
             elif 'lesion' in p.lower():
                 proteins = self.get_reacting_protein(p)
@@ -421,7 +469,10 @@ class DNAGillespie(Gillespie):
                     for prot in proteins:
                         if prev_lesion_state in dna_interact_dict:
                             if prot in dna_interact_dict[prev_lesion_state]:
-                                self.state[dna_interact_dict[prev_lesion_state][prot], self.protein_to_idx[prot]] += 1
+                                self.state[
+                                    dna_interact_dict[prev_lesion_state][prot.strip('!')],
+                                    self.protein_to_idx[prot.strip('!')]
+                                ] += 1
                                 continue
 
                         if prev_lesion_state == '':
@@ -429,6 +480,7 @@ class DNAGillespie(Gillespie):
                         area = self.determine_dna_idx_prod(prev_lesion_state, proteins=proteins)
                         pos = np.random.choice(area)
                         self.state[pos, self.protein_to_idx[prot]] += 1
+
             else:
                 self.gille_pool.increase(p)
 
@@ -439,6 +491,48 @@ class DNAGillespie(Gillespie):
         self.reaction_prob()
 
     def simulate(self, max_iter=10, random_power=5):
+        # TODO REMOVE
+        def update_rad26(s=None, e=None):
+            s = s if s is not None else self.dna_spec['transcript'][0]
+            e = e if e is not None else self.dna_spec['transcript'][1]
+            rad26_idc = np.where(
+                np.logical_and(
+                    np.logical_and(self.state[:, p_idx] > 0, np.sum(transcript_mask, axis=1)),
+                    self.state[:, rad26_idx] > 0
+                )
+            )[0]
+            free_neighbour = rad26_idc[self.state[rad26_idc + 1, rad26_idx] == 0]
+            free_neighbour = free_neighbour[np.logical_and(s <= free_neighbour, free_neighbour < e)]
+            if np.isin(e-1, rad26_idc) and not np.isin(e-1, free_neighbour):
+                free_neighbour = np.append(free_neighbour, [e-1])
+            self.state[free_neighbour, rad26_idx] -= 1
+            free_neighbour = free_neighbour[free_neighbour + 1 < e]
+            self.state[free_neighbour + 1, rad26_idx] += 1
+
+        def update_pol2(s=None, e=None):
+            s = s if s is not None else self.dna_spec['transcript'][0]
+            e = e if e is not None else self.dna_spec['transcript'][1]
+            inactive_pol2 = self.protein_to_idx[Protein.POL2]
+            pol2_mask = np.where(
+                np.logical_and(
+                    self.state[:, p_idx] == 1,
+                    self.state[:, p_idx] + np.roll(self.state[:, inactive_pol2], shift=-1) < 2
+                )
+            )[0]
+            pol2_mask = pol2_mask[np.logical_and(s <= pol2_mask, pol2_mask < e)]
+
+            self.state[pol2_mask, p_idx] -= 1
+            pol2_mask = pol2_mask[pol2_mask + 1 < e]
+            self.state[pol2_mask + 1, p_idx] += 1
+            # Handling of stacked active Pol2 that got blocked by inactive Pol2
+            # See Saeki 2009
+            if np.any(self.state[:, p_idx] > 1):
+                stack_idx = np.where(self.state[:, p_idx] > 1)[0]
+                self.state[stack_idx, p_idx] -= 1
+                for si in stack_idx:
+                    head_collision = np.arange(si, 0, -1)[np.argmin(self.state[si::-1, p_idx])]
+                    self.state[head_collision, p_idx] += 1
+
         tau_pool = self.gille_pool.simulate()
         tau_count = np.zeros(len(self.rules))
         for rs_idx in range(len(self.rules)):
@@ -461,6 +555,7 @@ class DNAGillespie(Gillespie):
                 self._update(mu, rs_idx)
 
         p_idx = self.protein_to_idx[ACTIVE_POL2]
+        rad26_idx = self.protein_to_idx[Protein.RAD26]
         transcript_mask = np.zeros(self.state.shape)
         transcript_mask[self.dna_spec['tss'][0]:self.dna_spec['transcript'][1], p_idx] = 1
         transcript_mask = transcript_mask.astype('bool')
@@ -473,7 +568,7 @@ class DNAGillespie(Gillespie):
             elong_update -= upd_step
 
             if not self.lesions:
-                self.state[transcript_mask] = np.pad(self.state[transcript_mask], (1, 0), mode='constant')[:-1]
+                update_pol2()
             else:
                 start = self.dna_spec['tss'][0]
                 for cpd in self.lesions:
@@ -485,16 +580,10 @@ class DNAGillespie(Gillespie):
                             continue
 
                     last_idx = np.arange(start, end)[::-1][np.argmin(self.state[start:end][:, p_idx][::-1])]
-                    cpd_move_mask = np.zeros(self.state.shape)
-                    cpd_move_mask[start:last_idx + 1, p_idx] = 1
-                    cpd_move_mask = cpd_move_mask.astype('bool')
-                    self.state[cpd_move_mask] = np.pad(self.state[cpd_move_mask], (1, 0), mode='constant')[:-1]
+                    update_pol2(start, last_idx)
                     start = cpd.end
                 end = self.dna_spec['transcript'][1]
-                cpd_move_mask = np.zeros(self.state.shape)
-                cpd_move_mask[start:end, p_idx] = 1
-                cpd_move_mask = cpd_move_mask.astype('bool')
-                self.state[cpd_move_mask] = np.pad(self.state[cpd_move_mask], (1, 0), mode='constant')[:-1]
+                update_pol2(start, end)
 
         self.reaction_prob()
 
@@ -573,7 +662,7 @@ def routine_gille_dna():
     rad3_cp_chip = 6.8 * 2
 
     pol2_trans_chip = 7.01 * 2
-    rad26_trans_chip = .35
+    rad26_trans_chip = 3.1 * 2
     disso_const = 10.
 
     random_asso = random_chip / (chip_norm * LENGTH)
@@ -642,8 +731,7 @@ def routine_gille_dna():
         ),
         Rule(
             reactants=[
-                'dna_transcript_%s' % ACTIVE_POL2,
-                '!dna_transcript_%s_%s' % (ACTIVE_POL2, Protein.RAD26),
+                'dna_transcript_%s_!%s' % (ACTIVE_POL2, Protein.RAD26),
                 Protein.RAD26
             ],
             products=['dna_transcript_%s_%s' % (ACTIVE_POL2, Protein.RAD26)],
@@ -660,32 +748,32 @@ def routine_gille_dna():
     # Damage response
     # #############################################
     elong_speed_treated = 400
-    rad4_cpd_chip = 3.2 * 10  # TODO Replace made up value
+    rad4_cpd_chip = 2.8  # TODO Replace made up value
     rad4_cpd_asso = rad4_cpd_chip / (chip_norm * (DEFAULT_CPD[1] - DEFAULT_CPD[0]))
-    # rad4_cpd_disso = 1. / (DEFAULT_CPD[1] - DEFAULT_CPD[0])
 
-    rad26_cpd_chip = 4.2 * 10  # TODO Replace made up value
+    rad26_cpd_chip = 3.1  # TODO Replace made up value
     rad26_cpd_asso = rad26_cpd_chip / (chip_norm * (DEFAULT_CPD[1] - DEFAULT_CPD[0]))
-    # rad26_cpd_disso = 1. / (DEFAULT_CPD[1] - DEFAULT_CPD[0])
 
-    rad3_cpd_chip = 6.1 * 10  # TODO Replace made up value
+    rad3_cpd_chip = 6.1  # TODO Replace made up value
     rad3_cpd_asso = rad3_cpd_chip / (chip_norm * (DEFAULT_CPD[1] - DEFAULT_CPD[0]))
     pol2_backtracking = rad3_cpd_asso
-    pol2_degradation = rad3_cpd_asso
 
     # Exclude Pol2 from random association/dissociation
     rules_cpd_random = [
-        Rule(reactants=['!dna_%s' % gp, gp], products=['dna_%s' % gp], c=random_asso * .1)  # TODO
+        Rule(reactants=['!dna_%s' % gp, gp], products=['dna_%s' % gp], c=random_asso * .1)  # TODO Replace made up value
         for gp in gille_proteins if gp != Protein.POL2
     ]
 
     rules_cpd_random.extend([
-        Rule(reactants=['dna_%s' % gp], products=[gp], c=random_disso * .1)  # TODO
+        Rule(reactants=['dna_%s' % gp], products=[gp], c=random_disso * .1)  # TODO Replace made up value
         for gp in gille_proteins if gp != Protein.POL2
     ])
 
     damage_response = [
-        # Still Pol2 association but with reduced interaction probability
+        # ##########################
+        # TC-NER
+        # ##########################
+        # Still Pol2 transcription and interaction with TSS but reduced probability
         Rule(
             reactants=['dna_cp_%s' % Protein.RAD3, '!dna_tss_%s' % ACTIVE_POL2, Protein.POL2],
             products=['dna_cp_%s' % Protein.RAD3, 'dna_tss_%s' % ACTIVE_POL2],
@@ -697,26 +785,41 @@ def routine_gille_dna():
             c=pol2_disso * .1
         ),
 
-        # Higher dissociation probability for RAD3 from cp
+        # Same dissociation probability for RAD3 from cp but no further association
         Rule(
             reactants=['dna_cp_%s' % Protein.RAD3],
             products=[Protein.RAD3],
             c=rad3_cp_disso
         ),
 
-        # Rad26 association to active Pol2
+        # Rad26 association to Pol2
+        # TODO is that reasonable? Or only slightly higher association to stalled Pol2
         Rule(
             reactants=[
-                'dna_transcript_%s' % ACTIVE_POL2,
-                '!dna_transcript_%s_%s' % (ACTIVE_POL2, Protein.RAD26),
+                'dna_transcript_%s_!%s' % (Protein.POL2, Protein.RAD26),
+                Protein.RAD26
+            ],
+            products=['dna_transcript_%s_%s' % (Protein.POL2, Protein.RAD26)],
+            c=rad26_cpd_asso
+        ),
+        Rule(
+            reactants=[
+                'dna_transcript_%s_!%s' % (ACTIVE_POL2, Protein.RAD26),
                 Protein.RAD26
             ],
             products=['dna_transcript_%s_%s' % (ACTIVE_POL2, Protein.RAD26)],
             c=rad26_cpd_asso
         ),
+
+        # Create correlation between Rad26 and Pol2 due to higher dissociation of Rad26
         Rule(
-            reactants=['dna_transcript_%s_%s' % (ACTIVE_POL2, Protein.RAD26)],
-            products=['dna_transcript_%s' % ACTIVE_POL2, Protein.RAD26],
+            reactants=['dna_transcript_!%s_%s' % (Protein.POL2, Protein.RAD26)],
+            products=[Protein.RAD26],
+            c=rad26_disso
+        ),
+        Rule(
+            reactants=['dna_transcript_!%s_%s' % (ACTIVE_POL2, Protein.RAD26)],
+            products=[Protein.RAD26],
             c=rad26_disso
         ),
 
@@ -758,17 +861,6 @@ def routine_gille_dna():
             c=rad3_cpd_asso
         ),
 
-        # Continue to remove Pol2
-        # Rule(
-        #     reactants=[
-        #         'lesion_opened_%s' % ACTIVE_POL2,
-        #         'lesion_opened_%s' % Protein.RAD26,
-        #         '!lesion_opened_%s' % Protein.RAD3,
-        #         Protein.RAD3
-        #     ],
-        #     products=['lesion_opened_%s' % Protein.RAD26, 'lesion_opened_%s' % Protein.RAD3, Protein.POL2],  # Removal
-        #     c=rad3_cpd_asso
-        # ),
         Rule(
             reactants=[
                 'lesion_opened_%s' % ACTIVE_POL2,
@@ -783,55 +875,23 @@ def routine_gille_dna():
             c=pol2_backtracking
         ),
 
-        # Rule(
-        #     reactants=[
-        #         'dna_transcript_%s' % Protein.POL2,
-        #         '!dna_transcript_%s_%s' % (Protein.POL2, Protein.RAD26),
-        #         Protein.RAD26
-        #     ],
-        #     products=['dna_transcript_%s_%s' % (Protein.POL2, Protein.RAD26)],
-        #     c=rad26_asso
-        # ),
-        # Rule(
-        #     reactants=['dna_transcript_%s_%s' % (Protein.POL2, Protein.RAD26)],
-        #     products=['dna_transcript_%s' % Protein.POL2, Protein.RAD26],
-        #     c=rad26_disso
-        # )
-        # # Pol2 removal
-        # Rule(
-        #     reactants=[
-        #         'lesion_opened_%s' % ACTIVE_POL2,
-        #         'lesion_opened_%s' % Protein.RAD26,
-        #         'lesion_opened_%s' % Protein.RAD3
-        #     ],
-        #     products=[
-        #         'lesion_opened_%s' % Protein.RAD26,  'lesion_opened_%s' % Protein.RAD3,
-        #         Protein.POL2
-        #     ],  # Removal
-        #     c=rad3_cpd_asso
-        # ),
-        # Rule(
-        #     reactants=[
-        #         'lesion_opened_%s' % ACTIVE_POL2,
-        #         'lesion_opened_%s' % Protein.RAD26,
-        #         'lesion_opened_%s' % Protein.RAD3
-        #     ],
-        #     products=[
-        #         'lesion_opened_%s' % Protein.RAD26,  'lesion_opened_%s' % Protein.RAD3,
-        #         'dna_before_%s' % Protein.POL2  # Backtracking
-        #         ],
-        #     c=pol2_backtracking
-        # ),
-        # Rule(
-        #     reactants=[
-        #         'lesion_opened_%s' % ACTIVE_POL2,
-        #         'lesion_opened_%s' % Protein.RAD26,
-        #         'lesion_opened_%s' % Protein.RAD3
-        #     ],
-        #     products=['lesion_opened_%s' % Protein.RAD26,  'lesion_opened_%s' % Protein.RAD3],  # Degradation
-        #     c=pol2_degradation
-        # ),
-        # # Recruitment Rad3 GG-NER
+        # Continue to remove Pol2
+        Rule(
+            reactants=[
+                'lesion_opened_%s' % ACTIVE_POL2,
+                'lesion_opened_%s' % Protein.RAD26,
+                '!lesion_opened_%s' % Protein.RAD3,
+                Protein.RAD3
+            ],
+            products=['lesion_opened_%s' % Protein.RAD26, 'lesion_opened_%s' % Protein.RAD3, Protein.POL2],  # Removal
+            c=rad3_cpd_asso
+        ),
+
+        # ##########################
+        # GG-NER
+        # ##########################
+
+        # Recruitment Rad3 GG-NER
         # Rule(
         #     reactants=['lesion_recognised_%s' % Protein.RAD4, Protein.RAD3],
         #     products=[Protein.RAD4, 'lesion_opened_%s' % Protein.RAD3],
@@ -880,7 +940,7 @@ def routine_gille_dna():
             gille_dna.simulate(max_iter=100, random_power=5)
 
             if gille_dna.t > 20. and not is_radiated:
-                # plot()
+                plot()
                 rad3_nouv.append(gille_dna.state[:, gille_dna.protein_to_idx[Protein.RAD3]].copy())
                 pol2_nouv.append(
                     gille_dna.state[:, gille_dna.protein_to_idx[Protein.POL2]].copy()
