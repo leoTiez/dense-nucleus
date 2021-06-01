@@ -104,7 +104,7 @@ def routine_gille_dna():
             i += 1
             print('Time point: %.3f min' % gille_dna.t)
             print('\n')
-            gille_dna.simulate(max_iter=100, random_power=5)
+            gille_dna.simulate(max_iter=100)
 
             if gille_dna.t > radiation_time and not is_radiated:
                 if plot_single_cell:
