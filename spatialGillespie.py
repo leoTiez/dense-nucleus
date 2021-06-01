@@ -6,36 +6,7 @@ import numpy as np
 from modules.proteins import Protein
 import matplotlib.pyplot as plt
 from datahandler.seqDataHandler import smooth
-
-DEFAULT_DNA_SPEC = {
-    'range': (0, 100, 50, 51),
-    'cp': [(0, 20, 50, 51)],
-    'tss': [(20, 30, 50, 51)],
-    'tts': [(90, 100, 50, 51)]
-}
-
-LENGTH = 100
-DEFAULT_DNA_SPEC_1DIM = {
-    'cp': [0, 10],
-    'tss': [10, 25],  # Set TSS into transcript
-    'transcript': [15, 90],
-    'tts': [90, LENGTH]
-}
-
-DEFAULT_CPD_LENGTH = 5
-BACKTRACKING_LENGTH = 5
-DEFAULT_CPD = [30, 30 + DEFAULT_CPD_LENGTH]
-
-CPD_STATES = {
-    'new': 0,
-    'recognised': 1,
-    'opened': 2,
-    'incised': 3,
-    'replaced': 4,
-    'removed': 5
-}
-
-ACTIVE_POL2 = 'active %s' % Protein.POL2
+from modules.rules import *
 
 
 class Lesion:
@@ -46,23 +17,6 @@ class Lesion:
 
     def update_state_to(self, new_state):
         self.state = CPD_STATES[new_state]
-
-
-class Rule:
-    def __init__(self, reactants, products, c):
-        self.reactants = reactants
-        self.products = products
-        self.c = c
-
-    def react(self, elements):
-        if self.is_reacting(elements):
-            return self.products
-
-    def is_reacting(self, elements):
-        return np.all([i in self.reactants for i in elements])
-
-    def is_involved(self, element):
-        return element in self.reactants
 
 
 class Gillespie(ABC):
@@ -426,7 +380,7 @@ class DNAGillespie(Gillespie):
                                 if prot == Protein.POL2:
                                     a = np.where(
                                         np.logical_and(
-                                            self.state[:, self.protein_to_idx[ACTIVE_POL2]] < 1,
+                                            self.state[:, self.protein_to_idx[Protein.ACTIVE_POL2]] < 1,
                                             self.state[:, self.protein_to_idx[Protein.POL2]] < 1,
                                         )
                                     )[0]
@@ -510,7 +464,7 @@ class DNAGillespie(Gillespie):
             self.state[free_neighbour + 1, rad26_idx] += 1
 
         def update_pol2(s=None, e=None):
-            s = s if s is not None else self.dna_spec['transcript'][0]
+            s = s if s is not None else self.dna_spec['tss'][0]
             e = e if e is not None else self.dna_spec['transcript'][1]
             inactive_pol2 = self.protein_to_idx[Protein.POL2]
             pol2_mask = np.where(
@@ -554,8 +508,7 @@ class DNAGillespie(Gillespie):
                 tau_count[rs_idx] += tau
                 self._update(mu, rs_idx)
 
-        p_idx = self.protein_to_idx[ACTIVE_POL2]
-        rad26_idx = self.protein_to_idx[Protein.RAD26]
+        p_idx = self.protein_to_idx[Protein.ACTIVE_POL2]
         transcript_mask = np.zeros(self.state.shape)
         transcript_mask[self.dna_spec['tss'][0]:self.dna_spec['transcript'][1], p_idx] = 1
         transcript_mask = transcript_mask.astype('bool')
@@ -641,7 +594,7 @@ def routine_gille_dna():
         plt.plot(smooth(gille_dna.state[:, gille_dna.protein_to_idx[Protein.RAD3]], 3), label='Rad3', color='tab:orange')
         plt.plot(smooth(
             gille_dna.state[:, gille_dna.protein_to_idx[Protein.POL2]]
-            + gille_dna.state[:, gille_dna.protein_to_idx[ACTIVE_POL2]],
+            + gille_dna.state[:, gille_dna.protein_to_idx[Protein.ACTIVE_POL2]],
             3), label='Pol2', color='tab:green')
         plt.plot(smooth(gille_dna.state[:, gille_dna.protein_to_idx[Protein.RAD26]], 3), label='Rad26', color='tab:cyan')
         plt.plot(smooth(gille_dna.state[:, gille_dna.protein_to_idx[Protein.RAD4]], 3), label='Rad4', color='tab:red')
@@ -651,260 +604,21 @@ def routine_gille_dna():
         plt.legend(loc='upper right')
         plt.show()
 
-    # Pivotal definitions
-    # Time unit = minute
-    # Considering genes with high transcription rate
-    gille_proteins = Protein.get_types_gillespie()
-    elong_speed = 1200
     num_prot = 1e5
-    chip_norm = 1e5
-    random_chip = 2.6
-    rad3_cp_chip = 6.8 * 2
+    num_iter = 10
+    radiation_time = 20.
+    after_radiation_time = 20.
+    random_lesion = False
+    plot_single_cell = True
 
-    pol2_trans_chip = 7.01 * 2
-    rad26_trans_chip = 3.1 * 2
-    disso_const = 10.
-
-    random_asso = random_chip / (chip_norm * LENGTH)
-    random_disso = disso_const / float(LENGTH)
-    rad3_cp_asso = rad3_cp_chip / float(chip_norm * (DEFAULT_DNA_SPEC_1DIM['cp'][1] - DEFAULT_DNA_SPEC_1DIM['cp'][0]))
-    rad3_cp_disso = disso_const / (DEFAULT_DNA_SPEC_1DIM['cp'][1] - DEFAULT_DNA_SPEC_1DIM['cp'][0])
-
-    pol2_trans_c = pol2_trans_chip / float(
-        chip_norm
-        * (
-                DEFAULT_DNA_SPEC_1DIM['cp'][1] - DEFAULT_DNA_SPEC_1DIM['cp'][0]
-                + DEFAULT_DNA_SPEC_1DIM['tss'][1] - DEFAULT_DNA_SPEC_1DIM['tss'][0]
-        )
-    )
-    pol2_disso = disso_const / (DEFAULT_DNA_SPEC_1DIM['tss'][1] - DEFAULT_DNA_SPEC_1DIM['tss'][0])
-
-    rad26_asso = rad26_trans_chip / (
-            chip_norm * (DEFAULT_DNA_SPEC_1DIM['transcript'][1] - DEFAULT_DNA_SPEC_1DIM['transcript'][0])
-        )
-    rad26_disso = disso_const / (DEFAULT_DNA_SPEC_1DIM['transcript'][1] - DEFAULT_DNA_SPEC_1DIM['transcript'][0])
-
-    rules_pool = []
+    gille_proteins = Protein.get_types_gillespie()
     concentrations_pool = {gp: num_prot for gp in gille_proteins}
     gille_proteins_elong = deepcopy(gille_proteins)
-    gille_proteins_elong.append(ACTIVE_POL2)
+    gille_proteins_elong.append(Protein.ACTIVE_POL2)
 
-    # #############################################
-    # Rules define association/dissociation behaviour between proteins and DNA
-    # #############################################
-    rules_random = [
-        Rule(reactants=['!dna_%s' % gp, gp], products=['dna_%s' % gp], c=random_asso)
-        for gp in gille_proteins if gp != Protein.POL2
-    ]
-
-    rules_random.append(
-        Rule(
-            reactants=['!dna_%s_%s' % (ACTIVE_POL2, Protein.POL2), Protein.POL2],
-            products=['dna_%s' % Protein.POL2],
-            c=random_asso * .1
-        )
-    )
-
-    rules_random.extend([
-        Rule(reactants=['dna_%s' % gp], products=[gp], c=random_disso)
-        for gp in gille_proteins
-    ])
-
-    rules_dna = [
-        # Rad3 associating to the core promoter
-        Rule(
-            reactants=['!dna_cp_%s' % Protein.RAD3, Protein.RAD3],
-            products=['dna_cp_%s' % Protein.RAD3], c=rad3_cp_asso
-        ),
-        Rule(reactants=['dna_cp_%s' % Protein.RAD3], products=[Protein.RAD3], c=rad3_cp_disso),
-        # Pol2 associating to the TSS if rad3 present at the core promoter but swiftly moving it to the
-        # beginning of the transcript
-        Rule(
-            reactants=['dna_cp_%s' % Protein.RAD3, '!dna_tss_%s' % ACTIVE_POL2, Protein.POL2],
-            products=['dna_cp_%s' % Protein.RAD3, 'dna_tss_%s' % ACTIVE_POL2],
-            c=pol2_trans_c
-        ),
-        Rule(
-            reactants=['dna_tss_%s' % ACTIVE_POL2],
-            products=[Protein.POL2],
-            c=pol2_disso
-        ),
-        Rule(
-            reactants=[
-                'dna_transcript_%s_!%s' % (ACTIVE_POL2, Protein.RAD26),
-                Protein.RAD26
-            ],
-            products=['dna_transcript_%s_%s' % (ACTIVE_POL2, Protein.RAD26)],
-            c=rad26_asso
-        ),
-        Rule(
-            reactants=['dna_transcript_%s_%s' % (ACTIVE_POL2, Protein.RAD26)],
-            products=['dna_transcript_%s' % ACTIVE_POL2, Protein.RAD26],
-            c=rad26_disso
-        )
-    ]
-
-    # #############################################
-    # Damage response
-    # #############################################
-    elong_speed_treated = 400
-    rad4_cpd_chip = 2.8  # TODO Replace made up value
-    rad4_cpd_asso = rad4_cpd_chip / (chip_norm * (DEFAULT_CPD[1] - DEFAULT_CPD[0]))
-
-    rad26_cpd_chip = 3.1  # TODO Replace made up value
-    rad26_cpd_asso = rad26_cpd_chip / (chip_norm * (DEFAULT_CPD[1] - DEFAULT_CPD[0]))
-
-    rad3_cpd_chip = 6.1  # TODO Replace made up value
-    rad3_cpd_asso = rad3_cpd_chip / (chip_norm * (DEFAULT_CPD[1] - DEFAULT_CPD[0]))
-    pol2_backtracking = rad3_cpd_asso
-
-    # Exclude Pol2 from random association/dissociation
-    rules_cpd_random = [
-        Rule(reactants=['!dna_%s' % gp, gp], products=['dna_%s' % gp], c=random_asso * .1)  # TODO Replace made up value
-        for gp in gille_proteins if gp != Protein.POL2
-    ]
-
-    rules_cpd_random.extend([
-        Rule(reactants=['dna_%s' % gp], products=[gp], c=random_disso * .1)  # TODO Replace made up value
-        for gp in gille_proteins if gp != Protein.POL2
-    ])
-
-    damage_response = [
-        # ##########################
-        # TC-NER
-        # ##########################
-        # Still Pol2 transcription and interaction with TSS but reduced probability
-        Rule(
-            reactants=['dna_cp_%s' % Protein.RAD3, '!dna_tss_%s' % ACTIVE_POL2, Protein.POL2],
-            products=['dna_cp_%s' % Protein.RAD3, 'dna_tss_%s' % ACTIVE_POL2],
-            c=pol2_trans_c * .1
-        ),
-        Rule(
-            reactants=['dna_tss_%s' % ACTIVE_POL2],
-            products=[Protein.POL2],
-            c=pol2_disso * .1
-        ),
-
-        # Same dissociation probability for RAD3 from cp but no further association
-        Rule(
-            reactants=['dna_cp_%s' % Protein.RAD3],
-            products=[Protein.RAD3],
-            c=rad3_cp_disso
-        ),
-
-        # Rad26 association to Pol2
-        # TODO is that reasonable? Or only slightly higher association to stalled Pol2
-        Rule(
-            reactants=[
-                'dna_transcript_%s_!%s' % (Protein.POL2, Protein.RAD26),
-                Protein.RAD26
-            ],
-            products=['dna_transcript_%s_%s' % (Protein.POL2, Protein.RAD26)],
-            c=rad26_cpd_asso
-        ),
-        Rule(
-            reactants=[
-                'dna_transcript_%s_!%s' % (ACTIVE_POL2, Protein.RAD26),
-                Protein.RAD26
-            ],
-            products=['dna_transcript_%s_%s' % (ACTIVE_POL2, Protein.RAD26)],
-            c=rad26_cpd_asso
-        ),
-
-        # Create correlation between Rad26 and Pol2 due to higher dissociation of Rad26
-        Rule(
-            reactants=['dna_transcript_!%s_%s' % (Protein.POL2, Protein.RAD26)],
-            products=[Protein.RAD26],
-            c=rad26_disso
-        ),
-        Rule(
-            reactants=['dna_transcript_!%s_%s' % (ACTIVE_POL2, Protein.RAD26)],
-            products=[Protein.RAD26],
-            c=rad26_disso
-        ),
-
-        # Recruitment Rad26 to lesion in TC-NER
-        Rule(
-            reactants=['lesion_recognised_%s' % ACTIVE_POL2, '!lesion_recognised_%s' % Protein.RAD26, Protein.RAD26],
-            products=['lesion_recognised_%s' % ACTIVE_POL2, 'lesion_recognised_%s' % Protein.RAD26],
-            c=rad26_cpd_asso
-        ),
-
-        # Recruitment Rad3 TC-NER
-        Rule(
-            reactants=[
-                'lesion_recognised_%s' % ACTIVE_POL2,
-                'lesion_recognised_%s' % Protein.RAD26,
-                '!lesion_recognised_%s' % Protein.RAD3,
-                Protein.RAD3
-            ],
-            products=['lesion_opened_%s' % Protein.RAD26, 'lesion_opened_%s' % Protein.RAD3, Protein.POL2],  # Removal
-            c=rad3_cpd_asso
-        ),
-        Rule(
-            reactants=[
-                'lesion_recognised_%s' % ACTIVE_POL2,
-                'lesion_recognised_%s' % Protein.RAD26,
-                '!lesion_recognised_%s' % Protein.RAD3,
-                Protein.RAD3
-            ],
-            products=['dna_before_%s' % Protein.RAD26, 'lesion_opened_%s' % Protein.RAD3,
-                      'dna_before_%s' % Protein.POL2  # Backtracking, doesn't move anymore
-                      ],
-            c=pol2_backtracking
-        ),
-
-        # Continue recruiting Rad3 in the opened state
-        Rule(
-            reactants=['!lesion_opened_%s' % Protein.RAD3, Protein.RAD3],
-            products=['lesion_opened_%s' % Protein.RAD3],
-            c=rad3_cpd_asso
-        ),
-
-        Rule(
-            reactants=[
-                'lesion_opened_%s' % ACTIVE_POL2,
-                'lesion_opened_%s' % Protein.RAD26,
-                'lesion_opened_%s' % Protein.RAD3
-            ],
-            products=[
-                'dna_before_%s' % Protein.RAD26,
-                'lesion_opened_%s' % Protein.RAD3,
-                'dna_before_%s' % Protein.POL2  # Backtracking, doesn't move anymore
-            ],
-            c=pol2_backtracking
-        ),
-
-        # Continue to remove Pol2
-        Rule(
-            reactants=[
-                'lesion_opened_%s' % ACTIVE_POL2,
-                'lesion_opened_%s' % Protein.RAD26,
-                '!lesion_opened_%s' % Protein.RAD3,
-                Protein.RAD3
-            ],
-            products=['lesion_opened_%s' % Protein.RAD26, 'lesion_opened_%s' % Protein.RAD3, Protein.POL2],  # Removal
-            c=rad3_cpd_asso
-        ),
-
-        # ##########################
-        # GG-NER
-        # ##########################
-
-        # Recruitment Rad3 GG-NER
-        # Rule(
-        #     reactants=['lesion_recognised_%s' % Protein.RAD4, Protein.RAD3],
-        #     products=[Protein.RAD4, 'lesion_opened_%s' % Protein.RAD3],
-        #     c=rad3_cpd_asso
-        # ),
-
-        # # Dissociation of Rad3 from lesion
-        # Rule(
-        #     reactants=['dna_lesion_%s' % Protein.RAD3, 'dna_lesion_%s' % Protein.POL2],
-        #     products=[Protein.RAD3, 'dna_lesion_%s' % Protein.POL2],
-        #     c=rad3_cpd_disso
-        # )
-    ]
+    rules_pool = PoolNoInteract()
+    nouv_rules = NoUVHigh(gille_proteins=gille_proteins)
+    damage_response = RepairHigh(gille_proteins=gille_proteins)
 
     rad3_nouv = []
     pol2_nouv = []
@@ -914,21 +628,15 @@ def routine_gille_dna():
     pol2_t0 = []
     rad26_t0 = []
     cpd_distribution = []
-    for t in range(10):
-        # Put rules together. Although possible to use different rule sets, the single cell scale should make
-        # functional interactions much more likely than random intractions. Overall, interactions are slower
-        # on a single-cell scale
-        rules = [[]]
-        rules[0].extend(rules_dna)
-        rules[0].extend(rules_random)
+    for t in range(num_iter):
         print('%s' % t)
-        gille_pool = PoolGillespie(protein_conc=concentrations_pool, rules=rules_pool)
+        gille_pool = PoolGillespie(protein_conc=concentrations_pool, rules=rules_pool.rules)
         gille_dna = DNAGillespie(
             gille_pool,
             dna_spec=DEFAULT_DNA_SPEC_1DIM.copy(),
             protein_names=gille_proteins_elong,
-            rules=rules,
-            elong_speed=elong_speed
+            rules=nouv_rules.rules,
+            elong_speed=nouv_rules.elong_speed
         )
         i = 0
         is_radiated = False
@@ -939,37 +647,37 @@ def routine_gille_dna():
             print('\n')
             gille_dna.simulate(max_iter=100, random_power=5)
 
-            if gille_dna.t > 20. and not is_radiated:
-                plot()
+            if gille_dna.t > radiation_time and not is_radiated:
+                if plot_single_cell:
+                    plot()
                 rad3_nouv.append(gille_dna.state[:, gille_dna.protein_to_idx[Protein.RAD3]].copy())
                 pol2_nouv.append(
                     gille_dna.state[:, gille_dna.protein_to_idx[Protein.POL2]].copy()
-                    + gille_dna.state[:, gille_dna.protein_to_idx[ACTIVE_POL2]].copy()
+                    + gille_dna.state[:, gille_dna.protein_to_idx[Protein.ACTIVE_POL2]].copy()
                 )
                 rad26_nouv.append(gille_dna.state[:, gille_dna.protein_to_idx[Protein.RAD26]].copy())
 
                 radiation_t = gille_dna.t
                 print('##################### UV RADIATION')
-                # cpd_start = np.random.choice(
-                #     np.arange(DEFAULT_DNA_SPEC_1DIM['transcript'][0], DEFAULT_DNA_SPEC_1DIM['transcript'][1])
-                # )
-                cpd_start = DEFAULT_CPD[0]
+                if random_lesion:
+                    cpd_start = np.random.choice(
+                        np.arange(DEFAULT_DNA_SPEC_1DIM['transcript'][0], DEFAULT_DNA_SPEC_1DIM['transcript'][1])
+                    )
+                else:
+                    cpd_start = DEFAULT_CPD[0]
                 cpd_distribution.append(np.arange(cpd_start, cpd_start + DEFAULT_CPD_LENGTH))
-                rules = [[]]
-                rules[0].extend(rules_cpd_random)
-                rules[0].extend(damage_response)
-                gille_dna.set_rules(rules, elong_speed_treated)
+                gille_dna.set_rules(damage_response.rules, damage_response.elong_speed)
                 gille_dna.add_lesion(cpd_start, cpd_start + DEFAULT_CPD_LENGTH)
                 gille_dna.reaction_prob()
                 is_radiated = True
 
-            if radiation_t > 0 and gille_dna.t - radiation_t > 20:
-                plot()
-                # gille_dna.simulate()
+            if radiation_t > 0 and gille_dna.t - radiation_t > after_radiation_time:
+                if plot_single_cell:
+                    plot()
                 rad3_t0.append(gille_dna.state[:, gille_dna.protein_to_idx[Protein.RAD3]].copy())
                 pol2_t0.append(
                     gille_dna.state[:, gille_dna.protein_to_idx[Protein.POL2]].copy()
-                    + gille_dna.state[:, gille_dna.protein_to_idx[ACTIVE_POL2]].copy())
+                    + gille_dna.state[:, gille_dna.protein_to_idx[Protein.ACTIVE_POL2]].copy())
                 rad26_t0.append(gille_dna.state[:, gille_dna.protein_to_idx[Protein.RAD26]].copy())
                 break
 
