@@ -581,6 +581,15 @@ class Nucleus:
         return self
 
     def get_associated(self, prot_type, is_complex=False):
+        """
+        Get all proteins of a certain type that are associated to the DNA
+        :param prot_type: Protein type
+        :type prot_type: str
+        :param is_complex: Flag to determine whether the function should look for a protein or a protein complex.
+        If True, it looks for a protein complex.
+        :type is_complex: bool
+        :return: Positions where the protein (complex) is associated
+        """
         positions = []
         for seg in self.dna:
             positions.extend(seg.associated_proteins(prot_type=prot_type, is_complex=is_complex))
