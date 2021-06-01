@@ -228,6 +228,14 @@ class DNA:
 
     @staticmethod
     def _is_in_area(area_key, pos):
+        """
+        Checks if the postion is in a given area on the DNA
+        :param area_key: Key of the area
+        :type area_key: str
+        :param pos: Postion on the genome
+        :type pos: int if one-dimensional, tuple(int) otherwise.
+        :return: True if it is in the area, False otherwise
+        """
         boundaries = area_key.split(':')
         return float(boundaries[0]) <= pos <= float(boundaries[1])
 
