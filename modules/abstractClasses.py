@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from abc import ABC
+from abc import ABC, abstractmethod
 
 
 class AbstractProtein(ABC):
@@ -20,4 +20,22 @@ class AbstractEvent(ABC):
 
 class AbstractAction(ABC):
     pass
+
+
+class Gillespie(ABC):
+    @abstractmethod
+    def h(self, reactants):
+        pass
+
+    @abstractmethod
+    def reaction_prob(self):
+        pass
+
+    @abstractmethod
+    def simulate(self):
+        pass
+
+    @abstractmethod
+    def plot(self):
+        pass
 
