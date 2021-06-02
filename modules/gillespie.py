@@ -594,9 +594,11 @@ class DNAGillespie(Gillespie):
                 if proteins is not None:
                     for prot in proteins:
                         if prev_lesion_state in dna_interact_dict:
-                            if prot in dna_interact_dict[prev_lesion_state]:
+                            update_mask = [prot_temp in dna_interact_dict[prev_lesion_state] for prot_temp in proteins]
+                            if any(update_mask):
+                                update_idx = np.where(update_mask)[0]
                                 self.state[
-                                    dna_interact_dict[prev_lesion_state][prot.strip('!')],
+                                    dna_interact_dict[prev_lesion_state][proteins[update_idx[0]]],
                                     self.protein_to_idx[prot.strip('!')]
                                 ] += 1
                                 continue
@@ -614,6 +616,9 @@ class DNAGillespie(Gillespie):
         for lesion_state, cpd in zip(new_lesion_state, lesion_inter):
             cpd.update_state_to(lesion_state)
 
+        for num in range(len(self.lesions)):
+            if self.lesions[num].state == CPD_STATES['removed']:
+                del self.lesions[num]
         self.reaction_prob()
 
     def simulate(self, max_iter=10):
