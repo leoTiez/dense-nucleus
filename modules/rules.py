@@ -196,6 +196,10 @@ class RepairHigh:
         self.rad26_cpd_chip = 3.1  # TODO Replace made up value
         self.rad4_cpd_chip = 1.7  # TODO Replace made up value
         self.pol2_trans_chip = 7.01  # TODO Replace made up value
+        self.rad2_cpd_chip = 3.1  # TODO Replace made up value
+        self.rad10_cpd_chip = 3.1  # TODO Replace made up value
+        self.poly_cpd_chip = 3.1  # TODO Replace made up value
+        self.ligase_cpd_chip = 3.1  # TODO Replace made up value
 
         self.random_asso = None
         self.random_disso = None
@@ -217,6 +221,17 @@ class RepairHigh:
 
         self.rad4_cpd_asso = None
         self._rad4()
+
+        self.rad2_cpd_asso = None
+        self.rad10_cpd_asso = None
+        self._rad2_rad10()
+
+        self.poly_cpd_asso = None
+        self.poly_repair_disso = None
+        self._dna_polymerase()
+
+        self.ligase_cpd_asso = None
+        self._dna_ligase()
 
         self.rules = [[]]
         self._rules()
@@ -249,6 +264,17 @@ class RepairHigh:
 
     def _rad4(self, factor=1.):
         self.rad4_cpd_asso = self.rad4_cpd_chip * factor / (self.chip_norm * (DEFAULT_CPD[1] - DEFAULT_CPD[0]))
+
+    def _rad2_rad10(self, factor=1.):
+        self.rad2_cpd_asso = self.rad2_cpd_chip * factor / (self.chip_norm * (DEFAULT_CPD[1] - DEFAULT_CPD[0]))
+        self.rad10_cpd_asso = self.rad10_cpd_chip * factor / (self.chip_norm * (DEFAULT_CPD[1] - DEFAULT_CPD[0]))
+
+    def _dna_polymerase(self, factor=1.):
+        self.poly_cpd_asso = self.poly_cpd_chip * factor / (self.chip_norm * (DEFAULT_CPD[1] - DEFAULT_CPD[0]))
+        self.poly_repair_disso = self.poly_cpd_asso
+
+    def _dna_ligase(self, factor=1.):
+        self.ligase_cpd_asso = self.ligase_cpd_chip * factor / (self.chip_norm * (DEFAULT_CPD[1] - DEFAULT_CPD[0]))
 
     def _rules_random(self):
         """
@@ -404,7 +430,7 @@ class RepairHigh:
                 products=['lesion_recognised_%s' % Protein.RAD4],
                 c=self.rad4_cpd_asso
             ),
-            # Recruitment Rad3 GG-NER
+            # Recruitment Rad3 GG-NER and Rad4 removal
             Rule(
                 reactants=['lesion_recognised_%s' % Protein.RAD4, Protein.RAD3],
                 products=[Protein.RAD4, 'lesion_opened_%s' % Protein.RAD3],
@@ -414,13 +440,106 @@ class RepairHigh:
 
         return gg_ner
 
-    def _rules_lesion(self):
-        pass
+    def _rules_incision(self):
+        incision = [
+            # Recruitment of Rad10
+            Rule(
+                reactants=[
+                    'lesion_opened_%s' % Protein.RAD3,
+                    'lesion_opened_%s' % Protein.RAD2,
+                    Protein.RAD10
+                ],
+                products=['lesion_opened_%s' % Protein.RAD3, 'lesion_opened_%s' % Protein.RAD10],
+                c=self.rad10_cpd_asso
+            ),
+            Rule(
+                reactants=[
+                    'lesion_opened_%s' % Protein.RAD3,
+                    'lesion_opened_%s' % Protein.RAD2,
+                    '!lesion_opened_%s' % Protein.RAD10,
+                    Protein.RAD10
+                ],
+                products=[
+                    'lesion_incised_%s' % Protein.RAD3,
+                    'lesion_incised_%s' % Protein.RAD10,
+                    'lesion_incised_%s' % Protein.RAD2
+                ],
+                c=self.rad10_cpd_asso
+            ),
+
+            # Recruitment of Rad2
+            Rule(
+                reactants=[
+                    'lesion_opened_%s' % Protein.RAD3,
+                    '!lesion_opened_%s' % Protein.RAD10,
+                    Protein.RAD2
+                ],
+                # Don't need to be at the exact same position. Sufficient to be on the lesion
+                products=['lesion_opened_%s' % Protein.RAD3, 'lesion_opened_%s' % Protein.RAD2],
+                c=self.rad2_cpd_asso
+            ),
+            Rule(
+                reactants=[
+                    'lesion_opened_%s' % Protein.RAD3,
+                    'lesion_opened_%s' % Protein.RAD10,
+                    Protein.RAD2
+                ],
+                products=[
+                    'lesion_incised_%s' % Protein.RAD3,
+                    'lesion_incised_%s' % Protein.RAD2,
+                    'lesion_incised_%s' % Protein.RAD10
+                ],  # Don't need to be at the exact same position. Sufficient to be on the lesion
+                c=self.rad2_cpd_asso
+            )
+        ]
+
+        return incision
+
+    def _rules_gap_filling(self):
+        gap_filling = [
+            # Recruitment of DNA Polymerase
+            Rule(
+                reactants=[
+                    'lesion_incised_%s' % Protein.RAD3,
+                    'lesion_incised_%s' % Protein.RAD2,
+                    'lesion_incised_%s' % Protein.RAD10,
+                    Protein.DNA_POL
+                ],
+                products=['lesion_replaced_%s' % Protein.DNA_POL, Protein.RAD3, Protein.RAD2, Protein.RAD10],
+                c=self.poly_cpd_asso
+            ),
+            # Removal of repair proteins
+            # Recruitment of DNA Polymerase
+            Rule(
+                reactants=[
+                    'lesion_replaced_%s' % Protein.RAD3,
+                    'lesion_replaced_%s' % Protein.RAD2,
+                    'lesion_replaced_%s' % Protein.RAD10,
+                    Protein.DNA_POL
+                ],
+                products=['lesion_replaced_%s' % Protein.DNA_POL, Protein.RAD3, Protein.RAD2, Protein.RAD10],
+                c=self.poly_repair_disso
+            )
+        ]
+        return gap_filling
+
+    def _rules_sealing(self):
+        sealing = [
+            Rule(
+                reactants=['lesion_replaced_%s' % Protein.DNA_POL, Protein.DNA_LIG],
+                products=['lesion_removed_%s' % Protein.DNA_LIG, Protein.DNA_POL],
+                c=self.ligase_cpd_asso
+            )
+        ]
+        return sealing
 
     def _rules(self):
         self.rules[0].extend(self._rules_random())
         self.rules[0].extend(self._rules_tc_ner())
         self.rules[0].extend(self._rules_gg_ner())
+        self.rules[0].extend(self._rules_incision())
+        self.rules[0].extend(self._rules_gap_filling())
+        self.rules[0].extend(self._rules_sealing())
 
 
 
