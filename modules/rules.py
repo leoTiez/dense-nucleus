@@ -187,14 +187,14 @@ class RepairHigh:
     def __init__(self, gille_proteins):
         self.gille_proteins = gille_proteins
 
-        self.elong_speed = 400
+        self.elong_speed = 0  # 400
         self.chip_norm = 1e5
 
         self.random_chip = 2.6   # TODO Replace made up value
         self.disso_const = 1.   # TODO Replace made up value
         self.rad3_cpd_chip = 6.1  # TODO Replace made up value
         self.rad26_cpd_chip = 3.1  # TODO Replace made up value
-        self.rad4_cpd_chip = 1.7  # TODO Replace made up value
+        self.rad4_cpd_chip = 1.  # TODO Replace made up value
         self.pol2_trans_chip = 7.01  # TODO Replace made up value
         self.rad2_cpd_chip = 3.1  # TODO Replace made up value
         self.rad10_cpd_chip = 3.1  # TODO Replace made up value
@@ -203,40 +203,40 @@ class RepairHigh:
 
         self.random_asso = None
         self.random_disso = None
-        self._random()
+        self._random(factor=.1)
 
         self.rad3_cpd_asso_rm = None
         self.rad3_cpd_asso_bt = None
         self.rad3_cpd_asso_gg = None
         self.rad3_cp_disso = None
-        self._rad3()
+        self._rad3(factor=.4)
 
         self.pol2_trans_c = None
         self.pol2_disso = None
-        self._pol2()
+        self._pol2(factor=.4)
 
         self.rad26_cpd_asso = None
         self.rad26_cpd_disso = None
-        self._rad26()
+        self._rad26(factor=.4)
 
         self.rad4_cpd_asso = None
-        self._rad4()
+        self._rad4(factor=.4)
 
         self.rad2_cpd_asso = None
         self.rad10_cpd_asso = None
-        self._rad2_rad10()
+        self._rad2_rad10(factor=.4)
 
         self.poly_cpd_asso = None
         self.poly_repair_disso = None
-        self._dna_polymerase()
+        self._dna_polymerase(factor=.4)
 
         self.ligase_cpd_asso = None
-        self._dna_ligase()
+        self._dna_ligase(factor=.4)
 
         self.rules = [[]]
         self._rules()
 
-    def _random(self, factor=.1, pol2_factor=.0):
+    def _random(self, factor=1., pol2_factor=.0):
         self.random_asso = self.random_chip * factor / (self.chip_norm * LENGTH)
         self.random_disso = self.disso_const / float(LENGTH)
         self.pol2_random_asso = self.random_asso * pol2_factor
