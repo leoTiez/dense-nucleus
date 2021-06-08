@@ -63,12 +63,12 @@ def routine_gille_dna():
     """
     num_prot = 1e5
     num_iter = 10
-    radiation_time = 20.
+    radiation_time = 10.
     after_radiation_time = 10.
     random_lesion = False
     plot_single_cell = True
-    inv_proteins = [Protein.RAD3, Protein.POL2, Protein.RAD10, Protein.RAD2, Protein.DNA_POL, Protein.DNA_LIG]
-    colors = ['tab:orange', 'tab:green', 'tab:cyan', 'tab:blue', 'yellow', 'tab:purple']
+    inv_proteins = [Protein.RAD4, Protein.RAD10, Protein.RAD2, Protein.DNA_POL, Protein.DNA_LIG]
+    colors = ['tab:red', 'tab:cyan', 'tab:blue', 'yellow', 'tab:purple']
 
     gille_proteins = Protein.get_types_gillespie()
     concentrations_pool = {gp: num_prot for gp in gille_proteins}
@@ -128,7 +128,8 @@ def routine_gille_dna():
                 gille_dna.reaction_prob()
                 is_radiated = True
 
-            if radiation_t > 0 and gille_dna.t - radiation_t > after_radiation_time:
+            if radiation_t > 0 and not gille_dna.lesions:
+                print(gille_dna.t)
                 if plot_single_cell:
                     gille_dna.plot(proteins=inv_proteins, colors=colors)
                 rad3_t0.append(gille_dna.get_protein_state(Protein.RAD3))
