@@ -7,31 +7,36 @@ from modules.abstractClasses import *
 from modules.messengers import *
 
 
+RAD3 = 'rad3'
+POL2 = 'pol2'
+RAD26 = 'rad26'
+RAD4 = 'rad4'
+RAD10 = 'rad10'
+RAD2 = 'rad2'
+DNA_POL = 'poly'
+DNA_LIG = 'cdc9'
+
+ACTIVE_POL2 = 'active pol2'
+
+IC_RAD3 = 'ic rad3'
+IC_POL2 = 'ic pol2'
+IC_RAD26 = 'ic rad26'
+
+COLORS = {
+    RAD3: 'orange',
+    IC_RAD3: 'grey',  # 'lightsalmon'
+    POL2: 'green',
+    IC_POL2: 'grey',  # 'springgreen'
+    RAD26: 'cyan',
+    IC_RAD26: 'grey',  # 'lightblue'
+}
+
+GG_COMP = 'gg complex'
+TC_COMP = 'tc complex'
+NUC_COMP = 'nucleotide replacement'
+
+
 class Protein(AbstractProtein, ABC):
-    RAD3 = 'rad3'
-    POL2 = 'pol2'
-    RAD26 = 'rad26'
-    RAD4 = 'rad4'
-    RAD10 = 'rad10'
-    RAD2 = 'rad2'
-    DNA_POL = 'poly'
-    DNA_LIG = 'cdc9'
-
-    ACTIVE_POL2 = 'active pol2'
-
-    IC_RAD3 = 'ic rad3'
-    IC_POL2 = 'ic pol2'
-    IC_RAD26 = 'ic rad26'
-
-    COLORS = {
-        RAD3: 'orange',
-        IC_RAD3: 'grey',  # 'lightsalmon'
-        POL2: 'green',
-        IC_POL2: 'grey',  # 'springgreen'
-        RAD26: 'cyan',
-        IC_RAD26: 'grey',  # 'lightblue'
-    }
-
     def __init__(self, species, p_inter, p_info, color, pos_dim=2):
         """
         Abstract Protein class.
@@ -245,7 +250,7 @@ class Protein(AbstractProtein, ABC):
         Get pre-defined protein types
         :return: List with pre-defined protein types
         """
-        return [Protein.RAD3, Protein.IC_RAD3, Protein.POL2, Protein.IC_POL2, Protein.RAD26, Protein.IC_RAD26]
+        return [RAD3, IC_RAD3, POL2, IC_POL2, RAD26, IC_RAD26]
 
     @staticmethod
     def get_types_gillespie():
@@ -253,8 +258,11 @@ class Protein(AbstractProtein, ABC):
         Get pre-defined protein types for the Gillespie algorithm
         :return: List with pre-defined protein types
         """
-        return [Protein.RAD3, Protein.POL2, Protein.RAD26, Protein.RAD4,
-                Protein.RAD10, Protein.RAD2, Protein.DNA_POL, Protein.DNA_LIG]
+        return [RAD3, POL2, RAD26, RAD4, RAD10, RAD2, DNA_POL, DNA_LIG]
+
+    @staticmethod
+    def get_types_easy():
+        return [GG_COMP, TC_COMP, NUC_COMP]
 
 
 class ProteinComplex(AbstractProteinComplex):
@@ -489,24 +497,24 @@ class Rad3(Protein):
         """
         if p_inter is None:
             p_inter = {
-                Protein.RAD3: .1,
-                Protein.IC_RAD3: .05,
-                Protein.POL2: .05,
-                Protein.IC_POL2: .05,
-                Protein.RAD26: .05,
-                Protein.IC_RAD26: .05,
+                RAD3: .1,
+                IC_RAD3: .05,
+                POL2: .05,
+                IC_POL2: .05,
+                RAD26: .05,
+                IC_RAD26: .05,
                 '%s:%s' % (.0, 1.): .05,  # Some random interaction with the DNA
             }
         if p_info is None:
             p_info = {
-                Protein.RAD3: .3,
-                Protein.IC_RAD3: .9,
-                Protein.POL2: .1,
-                Protein.IC_POL2: .1,
-                Protein.RAD26: .1,
-                Protein.IC_RAD26: .1,
+                RAD3: .3,
+                IC_RAD3: .9,
+                POL2: .1,
+                IC_POL2: .1,
+                RAD26: .1,
+                IC_RAD26: .1,
             }
-        super().__init__(Protein.RAD3, p_inter, p_info, Protein.COLORS[Protein.RAD3], pos_dim)
+        super().__init__(RAD3, p_inter, p_info, COLORS[RAD3], pos_dim)
 
 
 class InfoRad3(InfoProtein):
@@ -523,24 +531,24 @@ class InfoRad3(InfoProtein):
         """
         if p_inter is None:
             p_inter = {
-                Protein.RAD3: .05,
-                Protein.IC_RAD3: .05,
-                Protein.POL2: .05,
-                Protein.IC_POL2: .05,
-                Protein.RAD26: .05,
-                Protein.IC_RAD26: .05,
+                RAD3: .05,
+                IC_RAD3: .05,
+                POL2: .05,
+                IC_POL2: .05,
+                RAD26: .05,
+                IC_RAD26: .05,
                 '%s:%s' % (.0, 1.): .05,  # Some random interaction with the DNA
             }
         if p_info is None:
             p_info = {
-                Protein.RAD3: .9,
-                Protein.IC_RAD3: .9,
-                Protein.POL2: .1,
-                Protein.IC_POL2: .9,
-                Protein.RAD26: .1,
-                Protein.IC_RAD26: .9,
+                RAD3: .9,
+                IC_RAD3: .9,
+                POL2: .1,
+                IC_POL2: .9,
+                RAD26: .1,
+                IC_RAD26: .9,
             }
-        super().__init__(Protein.IC_RAD3, p_inter, p_info, Protein.COLORS[Protein.IC_RAD3], pos_dim)
+        super().__init__(IC_RAD3, p_inter, p_info, COLORS[IC_RAD3], pos_dim)
 
 
 class Pol2(Protein):
@@ -557,25 +565,25 @@ class Pol2(Protein):
         """
         if p_inter is None:
             p_inter = {
-                Protein.RAD3: .05,
-                Protein.IC_RAD3: .05,
-                Protein.POL2: .1,
-                Protein.IC_POL2: .05,
-                Protein.RAD26: .7,
-                Protein.IC_RAD26: .05,
+                RAD3: .05,
+                IC_RAD3: .05,
+                POL2: .1,
+                IC_POL2: .05,
+                RAD26: .7,
+                IC_RAD26: .05,
                 '%s:%s' % (.0, 1.): .005,  # Some random interaction with the DNA
             }
 
         if p_info is None:
             p_info = {
-                Protein.RAD3: .1,
-                Protein.IC_RAD3: .1,
-                Protein.POL2: .3,
-                Protein.IC_POL2: .9,
-                Protein.RAD26: .1,
-                Protein.IC_RAD26: .1,
+                RAD3: .1,
+                IC_RAD3: .1,
+                POL2: .3,
+                IC_POL2: .9,
+                RAD26: .1,
+                IC_RAD26: .1,
             }
-        super().__init__(Protein.POL2, p_inter, p_info, Protein.COLORS[Protein.POL2], pos_dim)
+        super().__init__(POL2, p_inter, p_info, COLORS[POL2], pos_dim)
 
 
 class InfoPol2(InfoProtein):
@@ -592,24 +600,24 @@ class InfoPol2(InfoProtein):
         """
         if p_inter is None:
             p_inter = {
-                Protein.RAD3: .05,
-                Protein.IC_RAD3: .05,
-                Protein.POL2: .05,
-                Protein.IC_POL2: .05,
-                Protein.RAD26: .05,
-                Protein.IC_RAD26: .05,
+                RAD3: .05,
+                IC_RAD3: .05,
+                POL2: .05,
+                IC_POL2: .05,
+                RAD26: .05,
+                IC_RAD26: .05,
                 '%s:%s' % (.0, 1.): .05,  # Some random interaction with the DNA
             }
         if p_info is None:
             p_info = {
-                Protein.RAD3: .1,
-                Protein.IC_RAD3: .9,
-                Protein.POL2: .9,
-                Protein.IC_POL2: .9,
-                Protein.RAD26: .1,
-                Protein.IC_RAD26: .9,
+                RAD3: .1,
+                IC_RAD3: .9,
+                POL2: .9,
+                IC_POL2: .9,
+                RAD26: .1,
+                IC_RAD26: .9,
             }
-        super().__init__(Protein.IC_POL2, p_inter, p_info, Protein.COLORS[Protein.IC_POL2], pos_dim)
+        super().__init__(IC_POL2, p_inter, p_info, COLORS[IC_POL2], pos_dim)
 
 
 class Rad26(Protein):
@@ -626,24 +634,24 @@ class Rad26(Protein):
         """
         if p_inter is None:
             p_inter = {
-                Protein.RAD3: .05,
-                Protein.IC_RAD3: .05,
-                Protein.POL2: .7,
-                Protein.IC_POL2: .05,
-                Protein.RAD26: .05,
-                Protein.IC_RAD26: .1,
+                RAD3: .05,
+                IC_RAD3: .05,
+                POL2: .7,
+                IC_POL2: .05,
+                RAD26: .05,
+                IC_RAD26: .1,
                 '%s:%s' % (.0, 1.): .05,  # Some random interaction with the DNA
             }
         if p_info is None:
             p_info = {
-                Protein.RAD3: .1,
-                Protein.IC_RAD3: .1,
-                Protein.POL2: .1,
-                Protein.IC_POL2: .1,
-                Protein.RAD26: .3,
-                Protein.IC_RAD26: .9,
+                RAD3: .1,
+                IC_RAD3: .1,
+                POL2: .1,
+                IC_POL2: .1,
+                RAD26: .3,
+                IC_RAD26: .9,
             }
-        super().__init__(Protein.RAD26, p_inter, p_info, Protein.COLORS[Protein.RAD26], pos_dim)
+        super().__init__(RAD26, p_inter, p_info, COLORS[RAD26], pos_dim)
 
 
 class InfoRad26(InfoProtein):
@@ -660,25 +668,25 @@ class InfoRad26(InfoProtein):
         """
         if p_inter is None:
             p_inter = {
-                Protein.RAD3: .05,
-                Protein.IC_RAD3: .05,
-                Protein.POL2: .05,
-                Protein.IC_POL2: .05,
-                Protein.RAD26: .05,
-                Protein.IC_RAD26: .05,
+                RAD3: .05,
+                IC_RAD3: .05,
+                POL2: .05,
+                IC_POL2: .05,
+                RAD26: .05,
+                IC_RAD26: .05,
                 '%s:%s' % (.0, 1.): .05,  # Some random interaction with the DNA
             }
 
         if p_info is None:
             p_info = {
-                Protein.RAD3: .1,
-                Protein.IC_RAD3: .9,
-                Protein.POL2: .1,
-                Protein.IC_POL2: .9,
-                Protein.RAD26: .9,
-                Protein.IC_RAD26: .9
+                RAD3: .1,
+                IC_RAD3: .9,
+                POL2: .1,
+                IC_POL2: .9,
+                RAD26: .9,
+                IC_RAD26: .9
             }
-        super().__init__(Protein.IC_RAD26, p_inter, p_info, Protein.COLORS[Protein.IC_RAD26], pos_dim)
+        super().__init__(IC_RAD26, p_inter, p_info, COLORS[IC_RAD26], pos_dim)
 
 
 class ProteinFactory:
@@ -698,17 +706,17 @@ class ProteinFactory:
         :type p_info: dict
         :return: Protein of the required type
         """
-        if prot_type == Protein.RAD3:
+        if prot_type == RAD3:
             return Rad3(p_inter, p_info, pos_dim)
-        elif prot_type == Protein.IC_RAD3:
+        elif prot_type == IC_RAD3:
             return InfoRad3(p_inter, p_info, pos_dim)
-        elif prot_type == Protein.POL2:
+        elif prot_type == POL2:
             return Pol2(p_inter, p_info, pos_dim)
-        elif prot_type == Protein.IC_POL2:
+        elif prot_type == IC_POL2:
             return InfoPol2(p_inter, p_info, pos_dim)
-        elif prot_type == Protein.RAD26:
+        elif prot_type == RAD26:
             return Rad26(p_inter, p_info, pos_dim)
-        elif prot_type == Protein.IC_RAD26:
+        elif prot_type == IC_RAD26:
             return InfoRad26(p_inter, p_info, pos_dim)
         else:
             raise ValueError('Protein type %s is not supported' % prot_type)
