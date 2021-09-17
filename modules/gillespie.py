@@ -116,14 +116,14 @@ class PoolGillespie(Gillespie):
         """
         self._change_reactant_delta(reactant, -1)
 
-    def increase(self, reactant):
+    def increase(self, reactant, diff=1):
         """
         Increase the number of available particles in the pool by one.
         :param reactant: Name of the reactant
         :type reactant: str
         :return: None
         """
-        self._change_reactant_delta(reactant, +1)
+        self._change_reactant_delta(reactant, diff)
 
     def simulate(self):
         """
@@ -179,6 +179,7 @@ class DNAGillespie(Gillespie):
             size=100,
             protein_names=Protein.get_types_gillespie(),
             dna_spec=DEFAULT_DNA_SPEC_1DIM,
+            begin_gene = 'cp',
             rules=[],
             elong_speed=1200
     ):
@@ -210,6 +211,12 @@ class DNAGillespie(Gillespie):
         self.state = np.zeros((size, num_species))
 
         self.dna_spec = dna_spec
+        self.gene_mask = np.zeros(self.size)
+        self.begin_gene = begin_gene
+        for s, e in zip(self.dna_spec[begin_gene][::2], self.dna_spec['tts'][::2]):
+            self.gene_mask[s:e] = 1
+        self.gene_mask = self.gene_mask.astype('bool')
+
         self.rules = None
         self.elong_speed = None
         self.a = None
@@ -294,15 +301,32 @@ class DNAGillespie(Gillespie):
             return np.arange(self.size)[interact_mask] if p_idc is not None else np.arange(self.size)
 
         split = dna_string.split('_')
+        # Must be true for all DNA or lesions
         if len(split) == 1:
+            # Since rules that apply for all DNA have been already applied, only catch lesion
             if split[0] == 'lesion':
                 if not self.lesions:
                     return []
                 else:
                     area = []
+                    considered_mask = np.zeros(self.size) if not must_free else np.ones(self.size)
+                    considered_mask = considered_mask.astype('bool')
                     for cpd in self.lesions:
-                        area.extend(list(range(cpd.start, cpd.end)))
-                    return area
+                        considered_mask[cpd.start:cpd.end] = True if not must_free else False
+
+                    if proteins is not None:
+                        for p_i, prot in zip(p_idc, proteins):
+                            if prot[0] == '!':
+                                area.extend(
+                                    np.where(np.logical_and(self.state[:, p_idc].reshape(-1) < 1, considered_mask))[0].tolist()
+                                )
+                            else:
+                                area.extend(
+                                    np.where(np.logical_and(self.state[:, p_idc].reshape(-1) >= 1, considered_mask))[0].tolist()
+                                )
+                    else:
+                        area.extend(np.arange(self.size)[considered_mask])
+                return area
             else:
                 raise ValueError('DNA segment is neither DNA nor lesion')
         dna_type = split[0]
@@ -327,6 +351,7 @@ class DNAGillespie(Gillespie):
             return area
         except ValueError:
             pass
+        # Determine specific DNA type
         if not area:
             border_start, border_end = [], []
             if dna_type == 'lesion':
@@ -472,8 +497,10 @@ class DNAGillespie(Gillespie):
                 continue
             if proteins is not None and len(dna_area) > 0 and '!' != dna_string[0]:
                 p_idc = [self.protein_to_idx[p.strip('!')] for p in proteins]
+                # TODO DNA CANNOT REACT W/ EACH OTHER BUT NO REACTANT HAS 2 DNA --> No prob but change to conditions maybe
                 dna_react *= np.sum(self.state[np.asarray(dna_area)][:, np.asarray(p_idc)])
             else:
+                # TODO DNA CANNOT REACT W/ EACH OTHER BUT NO REACTANT HAS 2 DNA --> No prob but change to conditions maybe
                 dna_react *= len(dna_area)
             if dna_react == 0:
                 return 0.
@@ -555,11 +582,11 @@ class DNAGillespie(Gillespie):
                         for cpd in lesion_inter:
                             area_backtrack = []
                             for prot in proteins:
-                                if prot == Protein.POL2:
+                                if prot == POL2:
                                     a = np.where(
                                         np.logical_and(
-                                            self.state[:, self.protein_to_idx[Protein.ACTIVE_POL2]] < 1,
-                                            self.state[:, self.protein_to_idx[Protein.POL2]] < 1,
+                                            self.state[:, self.protein_to_idx[ACTIVE_POL2]] < 1,
+                                            self.state[:, self.protein_to_idx[POL2]] < 1,
                                         )
                                     )[0]
                                 else:
@@ -606,6 +633,9 @@ class DNAGillespie(Gillespie):
                         if prev_lesion_state == '':
                             prev_lesion_state = 'lesion_%s' % lesion_state
                         area = self.determine_dna_idx_prod(prev_lesion_state, proteins=proteins)
+                        if len(area) == 0:
+                            print('DOMMAGE')
+                            break
                         pos = np.random.choice(area)
                         self.state[pos, self.protein_to_idx[prot]] += 1
 
@@ -616,12 +646,12 @@ class DNAGillespie(Gillespie):
         for lesion_state, cpd in zip(new_lesion_state, lesion_inter):
             cpd.update_state_to(lesion_state)
 
-        for num in range(len(self.lesions)):
+        for num in reversed(range(len(self.lesions))):
             if self.lesions[num].state == CPD_STATES['removed']:
                 del self.lesions[num]
         self.reaction_prob()
 
-    def simulate(self, max_iter=10):
+    def simulate(self, max_iter=10, bt_prob=.5, is_easy=True):
         """
         Simulate a reaction in the system. As there are several rule sets possible, the sample times can be different.
         Therefore, if a rule of one rule set takes much less time than the reaction of another rule set, more reactions
@@ -641,19 +671,27 @@ class DNAGillespie(Gillespie):
             :type e: int
             :return: None
             """
-            s = s if s is not None else self.dna_spec['tss'][0]
-            e = e if e is not None else self.dna_spec['transcript'][1]
-            inactive_pol2 = self.protein_to_idx[Protein.POL2]
-            pol2_mask = np.where(
-                np.logical_and(
-                    self.state[:, p_idx] == 1,
-                    self.state[:, p_idx] + np.roll(self.state[:, inactive_pol2], shift=-1) < 2
-                )
-            )[0]
-            pol2_mask = pol2_mask[np.logical_and(s <= pol2_mask, pol2_mask < e)]
+            s = s if s is not None else self.dna_spec[self.begin_gene][::2]
+            e = e if e is not None else self.dna_spec['transcript'][1::2]
+            pre_asso = np.sum(self.state[:, p_idx])
+            if not is_easy:
+                inactive_pol2 = self.protein_to_idx[POL2]
+                pol2_mask = np.where(
+                    np.logical_and(
+                        self.state[:, p_idx] == 1,
+                        self.state[:, p_idx] + np.roll(self.state[:, inactive_pol2], shift=-1) < 2
+                    )
+                )[0]
+            else:
+                pol2_mask = np.where(self.state[:, p_idx] == 1)[0]
+
+            pol2_mask = pol2_mask[
+                np.any(np.logical_and(np.less(s, pol2_mask[:, np.newaxis]), np.greater(e, pol2_mask[:, np.newaxis])),
+                       axis=1)
+            ]
 
             self.state[pol2_mask, p_idx] -= 1
-            pol2_mask = pol2_mask[pol2_mask + 1 < e]
+            pol2_mask = pol2_mask[np.any(np.greater(e, pol2_mask[:, np.newaxis] + 1), axis=1)]
             self.state[pol2_mask + 1, p_idx] += 1
             # Handling of stacked active Pol2 that got blocked by inactive Pol2
             # See Saeki 2009
@@ -661,8 +699,14 @@ class DNAGillespie(Gillespie):
                 stack_idx = np.where(self.state[:, p_idx] > 1)[0]
                 self.state[stack_idx, p_idx] -= 1
                 for si in stack_idx:
-                    head_collision = np.arange(si, 0, -1)[np.argmin(self.state[si::-1, p_idx])]
-                    self.state[head_collision, p_idx] += 1
+                    try:
+                        head_collision = np.arange(si, 0, -1)[np.argmin(self.state[si::-1, p_idx])]
+                        self.state[head_collision, p_idx] += 1
+                    except:
+                        print('shite')
+
+            post_asso = np.sum(self.state[:, p_idx])
+            self.gille_pool.increase(self.protein_names[p_idx], pre_asso-post_asso)
 
         tau_pool = self.gille_pool.simulate()
         tau_count = np.zeros(len(self.rules))
@@ -685,42 +729,41 @@ class DNAGillespie(Gillespie):
                 tau_count[rs_idx] += tau
                 self._update(mu, rs_idx)
 
-        p_idx = self.protein_to_idx[Protein.ACTIVE_POL2]
+        p_idx = self.protein_to_idx[ACTIVE_POL2] if not is_easy else self.protein_to_idx[TC_COMP]
         transcript_mask = np.zeros(self.state.shape)
-        transcript_mask[self.dna_spec['tss'][0]:self.dna_spec['transcript'][1], p_idx] = 1
+        for x, y in zip(self.dna_spec[self.begin_gene][::2], self.dna_spec['transcript'][1::2]):
+            transcript_mask[np.r_[x:y], p_idx] = 1
         transcript_mask = transcript_mask.astype('bool')
 
+        # TODO CHECK LONG ENOUGH TIME SCALE
         elong_update = int(self.elong_speed * max_tau)
         while elong_update > 0:
             upd_step = self.state[transcript_mask].sum()
             if upd_step == 0:
                 break
             elong_update -= upd_step
-
-            if not self.lesions:
-                update_pol2()
-            else:
-                start = self.dna_spec['tss'][0]
+            update_pol2()
+            if self.lesions:
                 for cpd in self.lesions:
-                    end = cpd.start
-                    if cpd.state == CPD_STATES['new']:
-                        if self.state[end - 1:cpd.end, p_idx].sum() > 0:
+                    if np.any(self.state[cpd.start:cpd.end, p_idx][self.gene_mask[cpd.start:cpd.end]] > 0):
+                        pos = np.argmax(self.state[cpd.start:cpd.end, p_idx][self.gene_mask[cpd.start:cpd.end]] > 0)
+                        self.state[cpd.start + pos, p_idx] -= 1
+                        if cpd.state == CPD_STATES['new']:
                             cpd.update_state_to('recognised')
+                        coin_flip = np.random.random()
+                        if coin_flip < bt_prob:
+                            flip_substate = np.flip(self.state[:cpd.start, p_idx])
+                            bt_pos = np.argmax(flip_substate == 0)
+                            flip_substate[bt_pos] += 1  # Also set state as this is no copy
                         else:
-                            continue
-
-                    last_idx = np.arange(start, end)[::-1][np.argmin(self.state[start:end][:, p_idx][::-1])]
-                    update_pol2(start, last_idx)
-                    start = cpd.end
-                end = self.dna_spec['transcript'][1]
-                update_pol2(start, end)
+                            self.gille_pool.increase(reactant=self.protein_names[p_idx])
 
         self.reaction_prob()
 
         self.t += max_tau
         return max_tau
 
-    def plot(self, proteins, colors, smoothing=3, save_plot=False, save_prefix=''):
+    def plot(self, proteins, colors, smoothing=3, axis=None):
         """
         Plot the state occupancy level on the DNA
         :param proteins: Proteins that are plotted
@@ -735,24 +778,22 @@ class DNAGillespie(Gillespie):
         :type save_prefix: str
         :return: None
         """
+        if axis is None:
+            axis = plt.gca()
+
         for p, c in zip(proteins, colors):
-            if p != Protein.POL2 and p != Protein.ACTIVE_POL2:
-                plt.plot(smooth(self.get_protein_state(p), smoothing), label=p, color=c)
+            if p != POL2 and p != ACTIVE_POL2:
+                axis.plot(smooth(self.get_protein_state(p), smoothing), label=p, color=c)
             else:
-                plt.plot(smooth(
-                    self.get_protein_state(Protein.POL2) + self.get_protein_state(Protein.ACTIVE_POL2),
+                axis.plot(smooth(
+                    self.get_protein_state(POL2) + self.get_protein_state(ACTIVE_POL2),
                     smoothing
                 ), label='Pol2', color=c)
 
-        plt.xlabel('DNA Position')
-        plt.ylabel('#Molecules')
-        plt.title('Smoothed ChIP-seq Simulation')
-        plt.legend(loc='upper right')
-        if not save_plot:
-            plt.show()
-        else:
-            path = validate_dir('figures')
-            plt.savefig('%s/%s_singe_cell_state.png' % (path, save_prefix))
+        axis.set_xlabel('DNA Position')
+        axis.set_ylabel('#Molecules')
+        axis.legend(loc='upper right')
+        return axis
 
     def get_protein_state(self, protein, start=None, end=None):
         """
@@ -768,3 +809,11 @@ class DNAGillespie(Gillespie):
         start = start if start is not None else 0
         end = end if end is not None else self.state.shape[0]
         return self.state[start:end, self.protein_to_idx[protein]].copy()
+
+    def get_lesion_state(self, start=None, end=None):
+        start = start if start is not None else 0
+        end = end if end is not None else self.state.shape[0]
+        lesion_state = np.zeros(self.size)
+        for cpd in self.lesions:
+            lesion_state[cpd.start:cpd.end] += 1
+        return lesion_state[start:end]
